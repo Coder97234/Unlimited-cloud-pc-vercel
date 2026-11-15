@@ -20,17 +20,37 @@ A static site (PC-Free marketing/docs pages) deployed on **Vercel**, starting fr
 | `images/` | Screenshots used by the pages and OG/Twitter cards |
 | `robots.txt`, `sitemap.xml`, `favicon.svg` | Search files |
 | `api/vm-config.js` | Serverless function returning the browser-safe VM config to `pc.html` |
+| `server.js`, `package.json` | Local host: static server + `/api/vm-config` + `/vm` reverse proxy (no deps) |
 | `windows10.yml`, `.env.example` | Docker Compose for the Windows 10 machine itself (not run by Vercel) |
 | `SITE-README.md` | The original README that shipped inside the zip |
 | `PC-Free-main.zip` | Original upload, kept for reference |
 
-## Deploy
+## Run it locally (the default way)
 
-It's a plain static site — no build step. On Vercel:
+No dependencies, no build step:
 
-1. Project root = repo root, **Framework Preset: Other**, build command empty, output directory `.`.
-2. Deploy. `vercel.json` turns on clean URLs (`/docs` instead of `/docs.html`) and adds
-   long-lived caching for `Assets/` and `images/`.
+```bash
+cp .env.example .env      # fill in VM_DESKTOP_URL once the machine is up
+npm start                 # -> http://localhost:3000
+```
+
+`server.js` serves the pages with clean URLs (`/docs`, `/pc`), answers `/api/vm-config`, and
+reverse-proxies `/vm/` to `VM_DESKTOP_URL` so the desktop embeds cleanly (it strips the
+`X-Frame-Options` / CSP frame-ancestors headers noVNC sends and passes the websocket through).
+
+Typical setup:
+
+```bash
+docker compose -f windows10.yml up -d     # the Windows 10 machine, desktop on :8006
+echo 'VM_DESKTOP_URL=http://localhost:8006' >> .env
+npm start                                 # then open http://localhost:3000/pc
+```
+
+## Deploy to Vercel (optional)
+
+The site itself is static; `vercel.json` handles clean URLs and caching, and `api/vm-config.js`
+takes over from `server.js` there. Note the `/vm` proxy only exists locally — on Vercel the page
+talks to `VM_DESKTOP_URL` directly, so the desktop must allow framing.
 
 ## Wiring the Windows VM into the site
 

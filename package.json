@@ -1,0 +1,13 @@
+{
+  "name": "unlimited-cloud-pc",
+  "version": "1.0.0",
+  "private": true,
+  "description": "PC-Free static site + local host that embeds the Windows 10 Docker desktop",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

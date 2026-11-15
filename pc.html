@@ -170,9 +170,10 @@
             <code>dockurr/windows</code> container and it will load the desktop right here.
           </p>
           <ol>
-            <li>Start the container (GitHub Codespaces, or Docker on any box).</li>
-            <li>Make port <code>8006</code> reachable — for Codespaces set its visibility to Public and copy the <code>https://…-8006.app.github.dev</code> URL.</li>
-            <li>In Vercel → this project → Settings → Environment Variables, set <code>VM_DESKTOP_URL</code> to that URL and redeploy.</li>
+            <li>Start the container: <code>docker compose -f windows10.yml up -d</code> (or run it in a Codespace).</li>
+            <li>Note the desktop address — <code>http://localhost:8006</code> locally, or the public <code>https://…-8006.app.github.dev</code> URL from the Codespaces Ports tab.</li>
+            <li>Put it in <code>.env</code> as <code>VM_DESKTOP_URL=…</code> and restart <code>npm start</code>. (
+            Phones/other devices can’t reach <code>localhost</code>; use the Codespace URL or a tunnel for those.)</li>
           </ol>
           <div class="pc-warn" id="embedWarn">
             The machine URL is set, but the browser refused to embed it. That usually means the
@@ -219,7 +220,7 @@
               setState('off', 'no machine configured');
               return;
             }
-            openLink.href = desktopUrl;
+            openLink.href = cfg.directUrl || desktopUrl;
             openLink.style.display = 'inline-flex';
             showDesktop(desktopUrl);
           })
