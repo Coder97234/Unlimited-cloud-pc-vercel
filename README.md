@@ -7,7 +7,7 @@ A static site (PC-Free marketing/docs pages) deployed on **Vercel**, starting fr
 
 | Path | What it is |
 | --- | --- |
-| `pc.html` | **The Windows PC** — embeds the live `dockurr/windows` desktop (port 8006) in an iframe, with an "open in new tab" fallback |
+| `index.html`, `desktop.css`, `desktop.js` | **The desktop** at `/` — boots a working browser desktop (windows, taskbar, start menu, files, notepad, calculator, terminal, wallpaper settings) and swaps itself for the real Windows VM when one is configured |
 | `quickstart.html` | Step-by-step setup guide |
 | `docs.html` | Full documentation |
 | `faq.html` | FAQ page |
@@ -18,6 +18,7 @@ A static site (PC-Free marketing/docs pages) deployed on **Vercel**, starting fr
 | `index.js` | Legacy script from the original site (not referenced by any page) |
 | `Assets/` | Hero/section background videos (`mano.mp4` is ~6 MB) |
 | `images/` | Screenshots used by the pages and OG/Twitter cards |
+| `pc.html` | Tiny redirect to `/` (kept so old links work) |
 | `robots.txt`, `sitemap.xml`, `favicon.svg` | Search files |
 | `api/vm-config.js` | Serverless function returning the browser-safe VM config to `pc.html` |
 | `server.js`, `package.json` | Local host: static server + `/api/vm-config` + `/vm` reverse proxy (no deps) |
@@ -31,8 +32,11 @@ No dependencies, no build step:
 
 ```bash
 cp .env.example .env      # fill in VM_DESKTOP_URL once the machine is up
-npm start                 # -> http://localhost:3000
+npm start                 # -> http://localhost:3000  (the desktop)
 ```
+
+`/` is the PC. With no `VM_DESKTOP_URL` it runs the built-in demo desktop so the page is usable
+immediately; with one set, the same page becomes the live Windows desktop.
 
 `server.js` serves the pages with clean URLs (`/docs`, `/pc`), answers `/api/vm-config`, and
 reverse-proxies `/vm/` to `VM_DESKTOP_URL` so the desktop embeds cleanly (it strips the
@@ -43,7 +47,7 @@ Typical setup:
 ```bash
 docker compose -f windows10.yml up -d     # the Windows 10 machine, desktop on :8006
 echo 'VM_DESKTOP_URL=http://localhost:8006' >> .env
-npm start                                 # then open http://localhost:3000/pc
+npm start                                 # then open http://localhost:3000
 ```
 
 ## Deploy to Vercel (optional)
@@ -68,8 +72,8 @@ Windows desktop runs elsewhere and `pc.html` loads it:
    - `VM_BOOT_URL` (optional) — where the "Start machine" button goes
    - `VM_LABEL` (optional) — name shown in the UI
 
-   Redeploy, then open `/pc`. Without `VM_DESKTOP_URL` the page shows setup instructions instead
-   of a broken frame.
+   Redeploy, then open `/`. Without `VM_DESKTOP_URL` the demo desktop shows instead of a broken
+   frame.
 
 If the desktop refuses to be embedded (noVNC sends frame restrictions in some setups), `pc.html`
 automatically offers "Open in new tab" — the machine still works, it just isn't framed.
@@ -80,7 +84,7 @@ automatically offers "Open in new tab" — the machine still works, it just isn'
   no publisher ID, and `privacy.html` now describes the site as cookie/tracker-free.
 - Canonical URLs, OG/Twitter image URLs and the sitemap still reference
   `https://jephersonrd.github.io/PC-Free/`. Swap in the Vercel domain once assigned.
-- `pc.html` is `noindex` and its URL is unguessable-ish but not protected — anyone with the link
+- The desktop is served locally only; it isn't protected — anyone with the link
   can reach the desktop, and so can anyone with the `-8006` Codespace URL itself. Keep the
   Codespace port private or stop the container when you're done.
 - `index.html` links `script.js`, which is empty. The old `index.js` (GSAP menu/scroll/FAQ

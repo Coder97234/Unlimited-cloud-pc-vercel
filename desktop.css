@@ -1,0 +1,434 @@
+/* Browser desktop shell — everything is prefixed .dt- so it can't clash with style.css */
+.dt-root {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  color: #fff;
+  background: #0a2a5e;
+  --accent: #0078d4;
+  --wall: radial-gradient(120% 120% at 20% 10%, #1b4f9c 0%, #0b3d7a 35%, #06224a 70%, #04142c 100%);
+  user-select: none;
+}
+.dt-wall {
+  position: absolute;
+  inset: 0;
+  background: var(--wall);
+  transition: background 0.4s ease;
+}
+.dt-wall::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(circle at 78% 22%, rgba(120, 200, 255, 0.22), transparent 42%),
+    radial-gradient(circle at 15% 85%, rgba(0, 120, 212, 0.28), transparent 45%);
+}
+
+/* ---------- desktop icons ---------- */
+.dt-icons {
+  position: absolute;
+  top: 18px;
+  left: 18px;
+  display: grid;
+  grid-auto-rows: 92px;
+  gap: 4px;
+  width: 92px;
+  z-index: 1;
+}
+.dt-icon {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 4px;
+  border-radius: 6px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  text-align: center;
+}
+.dt-icon:hover { background: rgba(255, 255, 255, 0.12); border-color: rgba(255, 255, 255, 0.16); }
+.dt-icon .glyph {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  font-size: 26px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.1);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+}
+.dt-icon .label {
+  font-size: 11.5px;
+  line-height: 1.25;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.75);
+  max-width: 88px;
+  word-break: break-word;
+}
+
+/* ---------- taskbar ---------- */
+.dt-taskbar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 8px;
+  background: rgba(20, 26, 34, 0.82);
+  backdrop-filter: blur(22px);
+  border-top: 1px solid rgba(255, 255, 255, 0.09);
+  z-index: 900;
+}
+.dt-tb-btn {
+  width: 42px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  font-size: 19px;
+  border-radius: 6px;
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+  position: relative;
+  color: #fff;
+}
+.dt-tb-btn:hover { background: rgba(255, 255, 255, 0.12); }
+.dt-tb-btn.running::after {
+  content: '';
+  position: absolute;
+  bottom: 3px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 14px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+.dt-tb-btn.active { background: rgba(255, 255, 255, 0.18); }
+.dt-start-orb .glyph {
+  display: grid;
+  grid-template-columns: repeat(2, 8px);
+  gap: 2px;
+}
+.dt-start-orb .glyph i {
+  width: 8px;
+  height: 8px;
+  background: #7cc4ff;
+  border-radius: 1.5px;
+  display: block;
+}
+.dt-tray {
+  position: absolute;
+  right: 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 11.5px;
+  color: #e6edf6;
+  padding-left: 8px;
+}
+.dt-tray .clock { text-align: right; line-height: 1.25; }
+.dt-tray .pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 20px;
+  padding: 4px 9px;
+  font-size: 11px;
+}
+.dt-tray .pill .dot { width: 7px; height: 7px; border-radius: 50%; background: #22c55e; }
+.dt-tray .pill.demo .dot { background: #fbbf24; }
+
+/* ---------- start menu ---------- */
+.dt-start {
+  position: absolute;
+  left: 50%;
+  bottom: 60px;
+  transform: translateX(-50%) translateY(12px);
+  width: min(560px, 94vw);
+  padding: 16px;
+  border-radius: 12px;
+  background: rgba(28, 34, 43, 0.94);
+  backdrop-filter: blur(30px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  z-index: 950;
+}
+.dt-start.open { opacity: 1; pointer-events: auto; transform: translateX(-50%) translateY(0); }
+.dt-start h4 {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #9db0c6;
+  margin: 4px 4px 10px;
+  font-weight: 600;
+}
+.dt-start-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+.dt-start-app {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 6px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 11.5px;
+  color: #eef4fb;
+  background: transparent;
+  border: 0;
+}
+.dt-start-app:hover { background: rgba(255, 255, 255, 0.1); }
+.dt-start-app .glyph { font-size: 23px; }
+.dt-start-foot {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  color: #b6c6d8;
+}
+.dt-start-foot button {
+  background: rgba(255, 255, 255, 0.09);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: #fff;
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 11.5px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.dt-start-foot button:hover { background: rgba(255, 255, 255, 0.16); }
+
+/* ---------- windows ---------- */
+.dt-window {
+  position: absolute;
+  min-width: 280px;
+  min-height: 170px;
+  display: flex;
+  flex-direction: column;
+  background: #1f242c;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 9px;
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+  z-index: 10;
+}
+.dt-window.minimized { display: none; }
+.dt-window.maximized {
+  left: 0 !important;
+  top: 0 !important;
+  width: 100% !important;
+  height: calc(100% - 52px) !important;
+  border-radius: 0;
+}
+.dt-titlebar {
+  height: 34px;
+  flex: 0 0 34px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 0 0 11px;
+  background: #262c35;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  cursor: grab;
+}
+.dt-titlebar .t-icon { font-size: 13px; opacity: 0.9; }
+.dt-titlebar .t-name {
+  font-size: 12px;
+  color: #e8eef6;
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dt-win-btns { display: flex; height: 100%; }
+.dt-win-btns button {
+  width: 40px;
+  height: 100%;
+  border: 0;
+  background: transparent;
+  color: #d7e2ee;
+  font-size: 13px;
+  cursor: pointer;
+  line-height: 1;
+}
+.dt-win-btns button:hover { background: rgba(255, 255, 255, 0.12); }
+.dt-win-btns button.close:hover { background: #c42b1c; color: #fff; }
+.dt-win-body { flex: 1; overflow: auto; font-size: 13px; color: #dbe5f0; }
+.dt-resize {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 14px;
+  height: 14px;
+  cursor: nwse-resize;
+  background: linear-gradient(135deg, transparent 50%, rgba(255, 255, 255, 0.35) 50%);
+}
+
+/* ---------- app content ---------- */
+.dt-pad { padding: 14px 16px; line-height: 1.6; }
+.dt-pad h3 { font-size: 15px; margin-bottom: 8px; color: #fff; }
+.dt-pad p { color: #b9c8d8; margin-bottom: 8px; }
+.dt-pad code {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 12px;
+  background: rgba(255, 255, 255, 0.09);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+.dt-notepad {
+  width: 100%;
+  height: 100%;
+  resize: none;
+  border: 0;
+  outline: 0;
+  padding: 12px 14px;
+  background: #0f1319;
+  color: #dbe5f0;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 12.5px;
+  line-height: 1.65;
+  user-select: text;
+}
+.dt-calc {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  height: 100%;
+  background: #14181f;
+}
+.dt-calc .screen {
+  padding: 14px 16px 10px;
+  text-align: right;
+  font-size: 26px;
+  font-weight: 300;
+  color: #fff;
+  min-height: 62px;
+  word-break: break-all;
+  user-select: text;
+}
+.dt-calc .screen small { display: block; font-size: 11.5px; color: #8d9db0; min-height: 15px; }
+.dt-calc .keys { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: #0b0e13; }
+.dt-calc .keys button {
+  border: 0;
+  padding: 14px 0;
+  font-size: 14px;
+  font-family: inherit;
+  color: #e9f0f8;
+  background: #1b212a;
+  cursor: pointer;
+}
+.dt-calc .keys button:hover { background: #252d38; }
+.dt-calc .keys button.op { color: #8ec5ff; }
+.dt-calc .keys button.eq { background: var(--accent); color: #fff; font-weight: 600; }
+.dt-calc .keys button.eq:hover { filter: brightness(1.1); }
+.dt-term {
+  height: 100%;
+  padding: 12px 14px;
+  background: #07090d;
+  color: #c8e6d0;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 12.5px;
+  line-height: 1.6;
+  overflow: auto;
+  user-select: text;
+}
+.dt-term .line { white-space: pre-wrap; word-break: break-word; }
+.dt-term .dim { color: #6f8296; }
+.dt-term .err { color: #ff8b7f; }
+.dt-term input {
+  background: transparent;
+  border: 0;
+  outline: 0;
+  color: #eaf7ee;
+  font: inherit;
+  width: 78%;
+}
+.dt-files { display: grid; grid-template-columns: 148px 1fr; height: 100%; }
+.dt-files .side {
+  background: #1a1f27;
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 10px 8px;
+  font-size: 12px;
+}
+.dt-files .side div { padding: 6px 9px; border-radius: 5px; cursor: pointer; color: #c3d2e2; }
+.dt-files .side div:hover { background: rgba(255, 255, 255, 0.08); }
+.dt-files .side div.cur { background: rgba(0, 120, 212, 0.28); color: #fff; }
+.dt-files .main { padding: 10px; display: flex; flex-wrap: wrap; gap: 6px; align-content: flex-start; }
+.dt-file {
+  width: 92px;
+  padding: 10px 6px;
+  border-radius: 6px;
+  text-align: center;
+  font-size: 11.5px;
+  cursor: pointer;
+  color: #dbe5f0;
+}
+.dt-file:hover { background: rgba(255, 255, 255, 0.08); }
+.dt-file .glyph { display: block; font-size: 24px; margin-bottom: 5px; }
+.dt-set { padding: 16px; }
+.dt-set h3 { font-size: 14px; margin: 0 0 10px; color: #fff; }
+.dt-set .row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 18px; }
+.dt-sw {
+  width: 84px;
+  height: 48px;
+  border-radius: 8px;
+  border: 2px solid transparent;
+  cursor: pointer;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2);
+}
+.dt-sw.on { border-color: var(--accent); }
+.dt-set .accents { display: flex; gap: 8px; margin-bottom: 18px; }
+.dt-set .accents button {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+}
+.dt-set .accents button.on { border-color: #fff; }
+.dt-set .meta { font-size: 11.5px; color: #93a6ba; line-height: 1.7; }
+
+/* ---------- toast (demo mode notice) ---------- */
+.dt-toast {
+  position: absolute;
+  right: 16px;
+  bottom: 64px;
+  max-width: 340px;
+  background: rgba(24, 30, 39, 0.95);
+  border: 1px solid rgba(251, 191, 36, 0.4);
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: #d6e2ef;
+  z-index: 940;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.45);
+}
+.dt-toast b { color: #fbbf24; }
+.dt-toast a { color: #7cc4ff; }
+.dt-toast button {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  background: transparent;
+  border: 0;
+  color: #9db0c6;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+@media (max-width: 640px) {
+  .dt-icons { grid-auto-rows: 84px; width: 80px; }
+  .dt-icon .glyph { width: 34px; height: 34px; font-size: 22px; }
+  .dt-start-grid { grid-template-columns: repeat(3, 1fr); }
+  .dt-tray .pill { display: none; }
+}

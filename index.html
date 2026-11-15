@@ -4,133 +4,82 @@
     <meta charset="UTF-8" />
     <link rel="icon" href="favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>PC-Free | Run Windows 10 Free in Your Browser (2025)</title>
-    <meta name="description" content="Run Windows 10 completely free in your browser with PC-Free. No PC required. Deploy in 5 minutes using Docker & GitHub Codespaces. Works on any device.">
-    <meta name="keywords" content="cloud pc free, windows 10 browser, run windows online, free cloud pc, github cloud pc, windows emulator online, pc virtual gratis">
-    <link rel="canonical" href="https://jephersonrd.github.io/PC-Free/">
-    <meta property="og:title" content="PC-Free | Run Windows 10 Free in Your Browser">
-    <meta property="og:description" content="Deploy a complete Windows 10 environment using Docker & GitHub Codespaces. No PC required, completely free.">
-    <meta property="og:image" content="https://jephersonrd.github.io/PC-Free/images/windows10-desktop.png">
-    <meta property="og:url" content="https://jephersonrd.github.io/PC-Free/">
-    <meta property="og:type" content="website">
-    <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="PC-Free | Run Windows 10 Free in Your Browser">
-    <meta name="twitter:description" content="Deploy Windows 10 in your browser. Free, no PC needed.">
-    <meta name="twitter:image" content="https://jephersonrd.github.io/PC-Free/images/windows10-desktop.png">
-    <link rel="stylesheet" href="style.css" />
+    <title>PC-Free — Windows in your browser</title>
+    <meta name="description" content="A Windows 10 desktop you open in a browser tab. Runs in Docker and is embedded right here." />
+    <link rel="stylesheet" href="desktop.css" />
   </head>
   <body>
-    <div class="hero-wrapper">
-      <video
-        autoplay
-        muted
-        loop
-        playsinline
-        poster="images/windows10-desktop.jpg"
-        class="hero-video"
-      >
-        <source src="Assets/mano.mp4" type="video/mp4" />
-      </video>
+    <div class="dt-root" id="dtRoot">
+      <!-- the real machine, when one is configured -->
+      <iframe
+        id="dtFrame"
+        hidden
+        title="Windows desktop"
+        allow="clipboard-read; clipboard-write; fullscreen"
+        referrerpolicy="no-referrer"
+        style="position:absolute;inset:0;width:100%;height:100%;border:0;background:#000"
+      ></iframe>
 
-      <div class="hero-content">
-        <nav class="hero-nav">
-          <div class="logo-container">
-            <svg width="18" height="18" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path fill="rgb(84, 84, 84)" d="M 160 88 L 194 34 L 216 0 L 256 0 L 256 40 L 221.5 93.5 L 200 128 L 256 128 L 256 256 L 96 256 L 96 168 L 64.246 220 L 40 256 L 0 256 L 0 216 L 34 162 L 56 128 L 0 128 L 0 0 L 160 0 Z" />
-            </svg>
-          </div>
-          <div class="nav-links-pill">
-            <a href="index.html" class="nav-link active">HOME</a>
-            <a href="pc.html" class="nav-link">MY PC</a>
-            <a href="quickstart.html" class="nav-link">QUICK START</a>
-            <a href="Compare.html" class="nav-link">COMPARISON</a>
-            <a href="faq.html" class="nav-link">FAQ</a>
-            <a href="docs.html" class="nav-link">DOCS</a>
-            <a href="https://github.com/jephersonRD/pc-free" class="nav-link" target="_blank">GITHUB</a>
-          </div>
-        </nav>
+      <!-- demo desktop chrome (hidden while a real VM is connected) -->
+      <div id="dtChrome" style="position:absolute;inset:0">
+        <div class="dt-wall" id="dtWall"></div>
 
-        <div class="hero-text">
-          <div class="hero-text-inner">
-            <a href="pc.html" class="badge-link">
-              MY PC-FREE
-              <span class="arrow">→</span>
-            </a>
-
-            <h1 class="hero-headline">
-              Run Windows 10 Free in Your Browser — Cloud PC (2025)
-            </h1>
-
-            <p class="hero-subtext">
-              Deploy a complete Windows 10 environment using Docker & GitHub Codespaces. No PC required.
-            </p>
-
-            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-              <a href="pc.html" class="cta-button">
-                Open my Windows PC
-                <span class="arrow">→</span>
-              </a>
-              <a href="quickstart.html" style="display:inline-flex;align-items:center;gap:6px;font-size:0.8125rem;font-weight:500;color:#111827;text-decoration:none;border-radius:9999px;padding:0.625rem 1.1rem;border:1px solid rgba(17,24,39,0.18);background:rgba(255,255,255,0.55);backdrop-filter:blur(8px);">
-                Setup guide
-              </a>
+        <div id="dtDesktop" style="position:absolute;inset:0">
+          <div class="dt-icons">
+            <div class="dt-icon" data-app="files" title="Double-click to open">
+              <span class="glyph">🗂️</span><span class="label">This PC</span>
             </div>
+            <div class="dt-icon" data-app="notepad">
+              <span class="glyph">📝</span><span class="label">Notepad</span>
+            </div>
+            <div class="dt-icon" data-app="term">
+              <span class="glyph">⌨️</span><span class="label">Terminal</span>
+            </div>
+            <div class="dt-icon" data-app="calc">
+              <span class="glyph">🧮</span><span class="label">Calculator</span>
+            </div>
+            <div class="dt-icon" data-app="guide">
+              <span class="glyph">🖥️</span><span class="label">Connect a real PC</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- start menu -->
+        <div class="dt-start" id="dtStart">
+          <h4>Pinned</h4>
+          <div class="dt-start-grid">
+            <button class="dt-start-app" data-app="files"><span class="glyph">🗂️</span>This PC</button>
+            <button class="dt-start-app" data-app="notepad"><span class="glyph">📝</span>Notepad</button>
+            <button class="dt-start-app" data-app="term"><span class="glyph">⌨️</span>Terminal</button>
+            <button class="dt-start-app" data-app="calc"><span class="glyph">🧮</span>Calculator</button>
+            <button class="dt-start-app" data-app="settings"><span class="glyph">⚙️</span>Settings</button>
+            <button class="dt-start-app" data-app="guide"><span class="glyph">🖥️</span>Connect a real PC</button>
+            <button class="dt-start-app" data-app="about"><span class="glyph">ℹ️</span>About</button>
+            <button class="dt-start-app" id="dtLock"><span class="glyph">🔒</span>Lock</button>
+          </div>
+          <div class="dt-start-foot">
+            <span>Demo desktop · no VM connected</span>
+            <span style="display:flex;gap:8px">
+              <button id="dtOpen" hidden>Open in new tab</button>
+              <button id="dtStop" onclick="location.reload()">Reload</button>
+            </span>
+          </div>
+        </div>
+
+        <!-- taskbar -->
+        <div class="dt-taskbar">
+          <button class="dt-tb-btn dt-start-orb" id="dtStartBtn" title="Start">
+            <span class="glyph"><i></i><i></i><i></i><i></i></span>
+          </button>
+          <div id="dtTasks" style="display:flex;gap:4px"></div>
+          <div class="dt-tray">
+            <span class="pill" id="dtStatePill"><span class="dot demo" id="dtStateDot"></span><span id="dtState">demo desktop</span></span>
+            <span class="clock" id="dtClock">--:--</span>
           </div>
         </div>
       </div>
     </div>
 
-    <section class="features-section" style="padding: 60px 24px 80px; max-width: 1020px; margin: 0 auto; position: relative; z-index: 10;">
-      <h2 style="font-family: 'Sora', sans-serif; font-size: clamp(22px, 3vw, 32px); font-weight: 700; color: #111827; text-align: center; margin-bottom: 40px; letter-spacing: -1px;">Why Use a Free Cloud PC in Your Browser?</h2>
-      <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; margin-bottom: 40px;">
-        <div style="background: rgba(255,255,255,0.55); border: 1px solid rgba(255,255,255,0.8); border-radius: 14px; padding: 20px; backdrop-filter: blur(16px);">
-          <h3 style="font-family: 'Sora', sans-serif; font-size: 15px; font-weight: 600; color: #111827; margin-bottom: 6px;">Windows 10 Emulator Online — Free</h3>
-          <p style="font-size: 13.5px; color: #6b7280; line-height: 1.6;">Access a full Windows 10 environment directly from your browser. No downloads, no installation, no credit card required.</p>
-        </div>
-        <div style="background: rgba(255,255,255,0.55); border: 1px solid rgba(255,255,255,0.8); border-radius: 14px; padding: 20px; backdrop-filter: blur(16px);">
-          <h3 style="font-family: 'Sora', sans-serif; font-size: 15px; font-weight: 600; color: #111827; margin-bottom: 6px;">Works on Any Device — Mobile, Chromebook, Tablet</h3>
-          <p style="font-size: 13.5px; color: #6b7280; line-height: 1.6;">Run Windows from your phone, iPad, or Chromebook. All you need is a modern browser and an internet connection.</p>
-        </div>
-        <div style="background: rgba(255,255,255,0.55); border: 1px solid rgba(255,255,255,0.8); border-radius: 14px; padding: 20px; backdrop-filter: blur(16px);">
-          <h3 style="font-family: 'Sora', sans-serif; font-size: 15px; font-weight: 600; color: #111827; margin-bottom: 6px;">Free Cloud PC with GitHub Codespaces</h3>
-          <p style="font-size: 13.5px; color: #6b7280; line-height: 1.6;">GitHub provides 120 free hours per month. Deploy your cloud PC in 5 minutes using Docker — no PC required, completely free.</p>
-        </div>
-      </div>
-      <div style="text-align: center;">
-        <a href="quickstart.html" style="display: inline-flex; align-items: center; gap: 8px; font-family: 'Sora', sans-serif; font-size: 14px; font-weight: 600; color: #fff; background: #3b82f6; border: 1.5px solid #60a5fa; border-radius: 100px; padding: 14px 32px; text-decoration: none; box-shadow: 0 4px 16px rgba(59,130,246,0.28); transition: background 0.18s, transform 0.12s;" onmouseover="this.style.background='#2563eb'" onmouseout="this.style.background='#3b82f6'">Get Your Free Windows 10 Cloud PC →</a>
-      </div>
-    </section>
-
-    <script type="application/ld+json">
-    {
-      "@context": "https://schema.org",
-      "@type": "SoftwareApplication",
-      "name": "PC-Free",
-      "description": "Run Windows 10 free in your browser using Docker and GitHub Codespaces",
-      "applicationCategory": "DeveloperApplication",
-      "operatingSystem": "Any (Browser-based)",
-      "offers": {
-        "@type": "Offer",
-        "price": "0",
-        "priceCurrency": "USD"
-      },
-      "author": {
-        "@type": "Person",
-        "name": "JephersonRD"
-      },
-      "softwareVersion": "1.0"
-    }
-    </script>
-
-    <footer style="position:relative;z-index:10;max-width:1020px;margin:48px auto 0;padding:24px;border-top:1px solid rgba(0,0,0,0.08);display:flex;flex-wrap:wrap;gap:8px 18px;justify-content:center;align-items:center;font-size:12.5px;color:#9ca3af;font-family:system-ui,-apple-system,'Segoe UI',sans-serif;">
-      <a href="index.html" style="color:#6b7280;text-decoration:none;">Home</a>
-      <a href="quickstart.html" style="color:#6b7280;text-decoration:none;">Quick Start</a>
-      <a href="docs.html" style="color:#6b7280;text-decoration:none;">Docs</a>
-      <a href="faq.html" style="color:#6b7280;text-decoration:none;">FAQ</a>
-      <a href="Compare.html" style="color:#6b7280;text-decoration:none;">Comparison</a>
-      <a href="privacy.html" style="color:#6b7280;text-decoration:none;font-weight:600;">Privacy Policy</a>
-      <span>© 2026 PC-Free</span>
-    </footer>
-
-    <script src="script.js"></script>
+    <script src="desktop.js"></script>
   </body>
 </html>
