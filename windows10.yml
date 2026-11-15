@@ -1,0 +1,38 @@
+# Windows 10 in Docker — the machine that pc.html embeds
+#
+#   cp .env.example .env      # then edit the username/password
+#   docker compose -f windows10.yml up -d
+#   open http://localhost:8006        <- noVNC desktop (this is VM_DESKTOP_URL)
+#
+# Requires KVM: run `ls /dev/kvm` on the host. Linux needs the kvm module;
+# macOS/Windows Docker Desktop exposes /dev/kvm only on some versions — if it
+# fails, drop the `devices:` block and the machine will run without hardware
+# acceleration (slow but works).
+
+services:
+  windows:
+    image: dockurr/windows
+    container_name: windows
+    environment:
+      VERSION: "10"
+      USERNAME: "${WINDOWS_USERNAME:-user}"
+      PASSWORD: "${WINDOWS_PASSWORD:-changeme}"
+      RAM_SIZE: "${WINDOWS_RAM:-8G}"
+      CPU_CORES: "${WINDOWS_CPUS:-4}"
+      DISK_SIZE: "${WINDOWS_DISK:-64G}"
+    cap_add:
+      - NET_ADMIN
+    ports:
+      - "8006:8006"   # web desktop (noVNC) — the URL pc.html loads
+      - "3389:3389"   # optional RDP
+    volumes:
+      - windows-data:/storage
+      - ./shared:/shared   # drop files here to move them into the VM
+    devices:
+      - /dev/kvm
+      - /dev/net/tun
+    stop_grace_period: 2m
+    restart: unless-stopped
+
+volumes:
+  windows-data:

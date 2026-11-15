@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" href="favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>My Windows PC — PC-Free</title>
+    <link rel="stylesheet" href="style.css" />
+    <style>
+      .pc-shell {
+        display: flex;
+        flex-direction: column;
+        min-height: 100vh;
+        background: #0b0d10;
+        color: #e5e7eb;
+      }
+      .pc-bar {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 10px 16px;
+        background: #12161b;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+        flex-wrap: wrap;
+      }
+      .pc-bar .brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        font-family: 'Sora', system-ui, sans-serif;
+        font-size: 13px;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+        color: #f9fafb;
+        text-decoration: none;
+      }
+      .pc-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 999px;
+        background: #4b5563;
+      }
+      .pc-dot.live { background: #22c55e; box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.18); }
+      .pc-dot.off { background: #ef4444; }
+      .pc-state {
+        font-size: 12px;
+        color: #9ca3af;
+      }
+      .pc-actions {
+        margin-left: auto;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .pc-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font: inherit;
+        font-size: 12.5px;
+        font-weight: 600;
+        color: #e5e7eb;
+        background: #1b2129;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 8px;
+        padding: 7px 12px;
+        text-decoration: none;
+        cursor: pointer;
+        transition: background 0.15s ease, border-color 0.15s ease;
+      }
+      .pc-btn:hover { background: #232b35; border-color: rgba(255, 255, 255, 0.18); }
+      .pc-btn.primary { background: #2563eb; border-color: #3b82f6; }
+      .pc-btn.primary:hover { background: #1d4ed8; }
+      .pc-stage {
+        position: relative;
+        flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 16px;
+        min-height: 60vh;
+      }
+      .pc-frame {
+        width: 100%;
+        height: calc(100vh - 120px);
+        min-height: 480px;
+        border: 0;
+        border-radius: 12px;
+        background: #000;
+        display: none;
+      }
+      .pc-frame.show { display: block; }
+      .pc-empty {
+        max-width: 620px;
+        background: #12161b;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 14px;
+        padding: 26px 28px;
+      }
+      .pc-empty h1 {
+        font-family: 'Sora', system-ui, sans-serif;
+        font-size: 19px;
+        font-weight: 600;
+        color: #f9fafb;
+        margin-bottom: 8px;
+      }
+      .pc-empty p, .pc-empty li {
+        font-size: 13.5px;
+        line-height: 1.65;
+        color: #9ca3af;
+      }
+      .pc-empty p + p { margin-top: 10px; }
+      .pc-empty ol { margin: 10px 0 0 18px; }
+      .pc-empty li + li { margin-top: 6px; }
+      .pc-empty code {
+        font-family: 'JetBrains Mono', ui-monospace, monospace;
+        font-size: 12px;
+        background: rgba(255, 255, 255, 0.07);
+        padding: 1px 5px;
+        border-radius: 4px;
+        color: #e5e7eb;
+      }
+      .pc-warn {
+        margin-top: 16px;
+        font-size: 12.5px;
+        line-height: 1.6;
+        color: #fbbf24;
+        background: rgba(251, 191, 36, 0.08);
+        border: 1px solid rgba(251, 191, 36, 0.25);
+        border-radius: 10px;
+        padding: 10px 12px;
+        display: none;
+      }
+      .pc-warn.show { display: block; }
+    </style>
+  </head>
+  <body>
+    <div class="pc-shell">
+      <header class="pc-bar">
+        <a class="brand" href="index.html">
+          <svg width="16" height="16" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path fill="currentColor" d="M 160 88 L 194 34 L 216 0 L 256 0 L 256 40 L 221.5 93.5 L 200 128 L 256 128 L 256 256 L 96 256 L 96 168 L 64.246 220 L 40 256 L 0 256 L 0 216 L 34 162 L 56 128 L 0 128 L 0 0 L 160 0 Z" />
+          </svg>
+          PC-FREE
+        </a>
+        <span class="pc-dot" id="stateDot"></span>
+        <span class="pc-state" id="stateText">checking machine…</span>
+        <div class="pc-actions">
+          <a class="pc-btn" id="bootLink" href="quickstart.html">Start machine</a>
+          <a class="pc-btn" id="openLink" href="#" target="_blank" rel="noopener" style="display:none">Open in new tab</a>
+          <button class="pc-btn primary" id="reloadBtn" type="button">Reload desktop</button>
+        </div>
+      </header>
+
+      <main class="pc-stage">
+        <iframe
+          id="desktopFrame"
+          class="pc-frame"
+          title="Windows desktop"
+          allow="clipboard-read; clipboard-write; fullscreen"
+          referrerpolicy="no-referrer"
+        ></iframe>
+
+        <section class="pc-empty" id="emptyState">
+          <h1>No machine is connected yet</h1>
+          <p>
+            This page is the front door to the Windows environment. Point it at your running
+            <code>dockurr/windows</code> container and it will load the desktop right here.
+          </p>
+          <ol>
+            <li>Start the container (GitHub Codespaces, or Docker on any box).</li>
+            <li>Make port <code>8006</code> reachable — for Codespaces set its visibility to Public and copy the <code>https://…-8006.app.github.dev</code> URL.</li>
+            <li>In Vercel → this project → Settings → Environment Variables, set <code>VM_DESKTOP_URL</code> to that URL and redeploy.</li>
+          </ol>
+          <div class="pc-warn" id="embedWarn">
+            The machine URL is set, but the browser refused to embed it. That usually means the
+            desktop sends <code>X-Frame-Options</code> / a restrictive <code>frame-ancestors</code>,
+            or it isn’t publicly reachable. Use “Open in new tab” instead — the desktop still works,
+            it just isn’t framed.
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script>
+      (function () {
+        var dot = document.getElementById('stateDot');
+        var text = document.getElementById('stateText');
+        var frame = document.getElementById('desktopFrame');
+        var empty = document.getElementById('emptyState');
+        var bootLink = document.getElementById('bootLink');
+        var openLink = document.getElementById('openLink');
+        var reloadBtn = document.getElementById('reloadBtn');
+        var warn = document.getElementById('embedWarn');
+        var desktopUrl = null;
+        var loaded = false;
+
+        function setState(kind, label) {
+          dot.className = 'pc-dot' + (kind ? ' ' + kind : '');
+          text.textContent = label;
+        }
+
+        function showDesktop(url) {
+          frame.src = url + (url.indexOf('?') === -1 ? '?' : '&') + 'autoconnect=1&resize=scale';
+          frame.classList.add('show');
+          empty.style.display = 'none';
+          loaded = true;
+          setState('live', 'machine connected');
+        }
+
+        fetch('api/vm-config')
+          .then(function (r) { return r.ok ? r.json() : Promise.reject(new Error('config ' + r.status)); })
+          .then(function (cfg) {
+            if (cfg.bootUrl) bootLink.href = cfg.bootUrl;
+            desktopUrl = cfg.desktopUrl;
+            if (!desktopUrl) {
+              setState('off', 'no machine configured');
+              return;
+            }
+            openLink.href = desktopUrl;
+            openLink.style.display = 'inline-flex';
+            showDesktop(desktopUrl);
+          })
+          .catch(function () {
+            setState('off', 'config unavailable');
+          });
+
+        // Detecting a cross-origin frame that refuses to load is not reliably possible;
+        // surface the fallback (open in new tab) after a moment instead of leaving a black box.
+        setTimeout(function () {
+          if (desktopUrl) warn.classList.add('show');
+        }, 6000);
+
+        reloadBtn.addEventListener('click', function () {
+          if (!desktopUrl) return;
+          loaded = false;
+          showDesktop(desktopUrl);
+        });
+      })();
+    </script>
+  </body>
+</html>
