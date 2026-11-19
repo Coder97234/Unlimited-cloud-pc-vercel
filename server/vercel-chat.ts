@@ -1,5 +1,5 @@
-import { handleChat } from '../server/chat.ts';
-import { generateOnServer } from '../server/inference.ts';
+import { handleChat } from './chat.ts';
+import { generateOnServer } from './inference.ts';
 
 export default {
   fetch(request: Request) {

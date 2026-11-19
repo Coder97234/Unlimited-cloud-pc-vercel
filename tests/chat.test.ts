@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import vercelChat from '../api/chat.ts';
+import vercelChat from '../server/vercel-chat.ts';
 import { handleChat, parseChat } from '../server/chat.ts';
 import { InferenceError } from '../server/inference-stream.ts';
 import { buildMessages, loadThreads } from '../src/lib/history.ts';

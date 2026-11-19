@@ -5,9 +5,10 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "functions": {
-    "api/chat.ts": {
+    "api/chat.js": {
       "maxDuration": 120,
-      "includeFiles": "{node_modules/node-llama-cpp/**,node_modules/@node-llama-cpp/linux-x64/**}"
+      "supportsCancellation": true,
+      "includeFiles": "{build/chat.mjs,node_modules/node-llama-cpp/**,node_modules/@node-llama-cpp/linux-x64/**}"
     }
   },
   "headers": [
