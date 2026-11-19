@@ -1,4 +1,7 @@
-import { DEFAULT_MODEL, MAX_ATTACHMENT, MAX_CONTEXT, MAX_MESSAGES, MODEL_NAME, withAttachment } from '../../shared/models.ts';
+import { brandAnswer } from '../../shared/branding.ts';
+import { DEFAULT_MODE, isReplyMode } from '../../shared/modes.ts';
+import type { ReplyMode } from '../../shared/modes.ts';
+import { DEFAULT_MODEL, MAX_ATTACHMENT, MAX_CONTEXT, MAX_MESSAGES, withAttachment } from '../../shared/models.ts';
 import type { ChatMessage, ReplySource, TextAttachment } from '../../shared/models.ts';
 import { MAX_SEARCH_QUERY, normalizeSources } from '../../shared/search.ts';
 import type { WebSource } from '../../shared/search.ts';
@@ -6,16 +9,15 @@ import { isSkillResultId } from '../../shared/skill-catalog.ts';
 import type { SkillResultId } from '../../shared/skill-catalog.ts';
 import { modelMessage } from '../../shared/skills.ts';
 
-// These names are retained for the local archive only. The API accepts Qwen 2.5.
-export const SAVED_MODEL_NAMES = {
-  [DEFAULT_MODEL]: MODEL_NAME, smollm: 'SmolLM2 360M', qwen: 'Qwen 3 32B', 'gpt-oss': 'GPT OSS 20B', mistral: 'Mistral Nemo',
-} as const;
-export type SavedModelId = keyof typeof SAVED_MODEL_NAMES;
+// Retain the old archive IDs for migration without turning them into labels.
+const archiveIds = ['smollm', 'qwen', 'gpt-oss', 'mistral'] as const;
+export type SavedModelId = typeof DEFAULT_MODEL | typeof archiveIds[number];
 export type ChatMode = 'chat' | 'compare';
 export type Attachment = TextAttachment;
 export type Answer = {
   model: SavedModelId;
   content: string;
+  replyMode?: ReplyMode;
   state: 'working' | 'finished' | 'stopped' | 'error';
   source?: ReplySource | 'legacy';
   skill?: SkillResultId;
@@ -31,18 +33,18 @@ export const MAX_TURNS = 30;
 
 function restoreAnswer(raw: unknown): Answer | undefined {
   if (!raw || typeof raw !== 'object') return;
-  const { model, content, state, source, skill, error, sources } = raw as Record<string, unknown>;
-  const id = model === 'local' ? DEFAULT_MODEL : model;
-  if (typeof id !== 'string' || !Object.hasOwn(SAVED_MODEL_NAMES, id) || typeof content !== 'string') return;
+  const { model, content, state, source, skill, error, sources, replyMode } = raw as Record<string, unknown>;
+  const id = model === 'local' || model === 'qwen-lite' ? DEFAULT_MODEL : model;
+  if ((id !== DEFAULT_MODEL && !archiveIds.some((old) => old === id)) || typeof content !== 'string') return;
   const legacy = id !== DEFAULT_MODEL || model === 'local' || source === 'on-device' || source === 'legacy' || source === 'hosted';
   return {
-    model: id as SavedModelId, content,
+    model: id as SavedModelId, content: brandAnswer(content), replyMode: isReplyMode(replyMode) ? replyMode : DEFAULT_MODE,
     state: state === 'finished' || state === 'error' ? state : 'stopped',
     source: legacy ? 'legacy' : source === 'preview' || source === 'server' || source === 'clock' || source === 'skill' ? source : undefined,
     skill: !legacy && isSkillResultId(skill) ? skill : undefined,
     sources: normalizeSources(sources),
-    error: state !== 'error' ? undefined : legacy ? 'This earlier reply did not finish. You can retry the prompt with Qwen 2.5 in chat.'
-      : typeof error === 'string' ? error : 'The reply did not finish. Try again.',
+    error: state !== 'error' ? undefined : legacy ? 'This earlier reply did not finish. You can retry the prompt in a new chat.'
+      : typeof error === 'string' ? brandAnswer(error) : 'The reply did not finish. Try again.',
   };
 }
 

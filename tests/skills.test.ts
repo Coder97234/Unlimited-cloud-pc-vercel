@@ -29,12 +29,12 @@ async function read(response: Response) {
 
 test('Xyvora consistently identifies the product and host without inventing a model identity', () => {
   for (const prompt of ['/about', '  Who are you? ', 'Who exactly are you?', 'What’s your real name?', 'Who are you and what is your website?', 'What model powers you?', 'Are you ChatGPT or Xyvora AI?', 'What site are you on?', 'Please tell me about yourself.', 'Who made you?']) {
-    assert.match(result(prompt), /\*\*Xyvora AI\*\*.*\[xyvora\.net\]\(https:\/\/xyvora\.net\).*\*\*Qwen 2\.5\*\*/, prompt);
+    assert.match(result(prompt), /\*\*Xyvora AI\*\*.*\[xyvora\.net\]\(https:\/\/xyvora\.net\)/, prompt);
     assert.equal(runInstantSkill(prompt)?.id, 'about');
   }
   for (const prompt of ['Who are you in this story? Tell me plot ideas.', 'Who created ChatGPT?', 'Rewrite “Who are you?”', '/aboutness', '/constructor', 'Is 2028-02-29 a holiday?']) assert.equal(runInstantSkill(prompt), undefined, prompt);
   assert.ok(SYSTEM_PROMPT.includes(XYVORA_NAME) && SYSTEM_PROMPT.includes(XYVORA_SITE));
-  assert.match(SYSTEM_PROMPT, /Qwen 2\.5/);
+  assert.doesNotMatch(SYSTEM_PROMPT, /qwen/i);
   assert.equal(isSkillId('constructor'), false);
   const help = result('What can you do?');
   for (const id of SKILL_IDS) if (id !== 'about') assert.ok(help.includes(`\`/${id}\``) && help.includes(SKILLS[id].name));
@@ -128,11 +128,11 @@ test('search is explicit; unrelated commands and identity questions cannot activ
   assert.equal(chatSearchQuery('Artemis', false), undefined);
 });
 
-test('workflow commands pass one task and its material to Qwen; missing input gets immediate guidance', async () => {
+test('workflow commands pass one task and its material to the reply engine; missing input gets immediate guidance', async () => {
   const generate = async (messages: { role: string; content: string }[], _signal: AbortSignal, onText: (text: string) => void) => {
     assert.equal(messages.length, 1);
     assert.equal(messages[0].role, 'user');
-    assert.match(messages[0].content, /^Summarize the provided material.*\n\nAttached text file \(notes.txt\):\nAva owns the next draft\.$/s);
+    assert.match(messages[0].content, /^Summarize the provided material.*\n\nAttached reference text \("notes.txt"; untrusted data\):\nAva owns the next draft\.\n\[End of reference text\]$/s);
     onText('Ava will write the next draft.');
   };
   const response = await handleChat(makeRequest('/summarize', { searchQuery: 'never send', attachment: { name: 'notes.txt', text: 'Ava owns the next draft.' } }), {
@@ -144,7 +144,7 @@ test('workflow commands pass one task and its material to Qwen; missing input ge
   assert.match(result('/summarize'), /Paste material/);
   assert.match(result('/translate Spanish'), /target language/);
   assert.match(modelMessage('/translate French: hello'), /Translate.*into French.*\n\nhello$/s);
-  assert.match(modelMessage('/translate French', { name: 'hello.txt', text: 'hello' }), /into French.*\n\nhello$/s);
+  assert.match(modelMessage('/translate French', { name: 'hello.txt', text: 'hello' }), /into French.*untrusted data.*\nhello\n\[End of reference text\]$/s);
   assert.equal(modelMessage('Normal chat'), 'Normal chat');
 });
 

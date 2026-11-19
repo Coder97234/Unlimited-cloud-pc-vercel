@@ -2,10 +2,10 @@ import { AlertCircle, ArrowUpRight, Check, Clipboard, Clock3, Globe, Paperclip, 
 import { lazy, memo, Suspense, useEffect, useRef, useState } from 'react';
 import { XYVORA_NAME } from '../../shared/models.ts';
 import { skillName } from '../../shared/skill-catalog.ts';
-import { SAVED_MODEL_NAMES } from '../lib/history.ts';
+import { DEFAULT_MODE, MODES } from '../../shared/modes.ts';
 import type { Answer, Thread } from '../lib/history.ts';
 import { hasCompletedWord, hopMascot } from '../lib/mascot-motion.ts';
-import { Mascot, ModelIcon } from './Brand.tsx';
+import { Mascot } from './Brand.tsx';
 
 function PlainAnswer({ content }: { content: string }) {
   return <div className="markdown plain-answer">{content}</div>;
@@ -28,8 +28,8 @@ function AnswerCard({ answer, archived, searching, onRetry, onAlert }: {
   const clock = answer.source === 'clock';
   const instant = answer.source === 'skill';
   const historical = archived || answer.source === 'legacy';
-  const name = historical ? SAVED_MODEL_NAMES[answer.model] : XYVORA_NAME;
-  const badge = clock ? 'Live clock' : instant ? (answer.skill ? skillName(answer.skill) : 'Built-in skill') : historical ? undefined : SAVED_MODEL_NAMES[answer.model];
+  const name = historical ? 'Earlier reply' : XYVORA_NAME;
+  const badge = clock ? 'Live clock' : instant ? (answer.skill ? skillName(answer.skill) : 'Built-in tool') : historical ? undefined : MODES[answer.replyMode ?? DEFAULT_MODE].name;
   const sources = answer.sources ?? [];
   const working = answer.state === 'working';
   const mascot = useRef<HTMLSpanElement>(null);
@@ -46,10 +46,9 @@ function AnswerCard({ answer, archived, searching, onRetry, onAlert }: {
   return <article className="answer-card" aria-label={`${clock || instant ? badge : name} response`}>
     <header className="answer-heading">
       {clock ? <span className="model-icon tint-sky"><Clock3 size={17} /></span> : instant ? <span className="model-icon tint-violet"><Zap size={17} /></span>
-        : historical ? <ModelIcon id={answer.model} /> : <Mascot className="reply-mark" motionRef={mascot} />}
+        : <Mascot className="reply-mark" motionRef={historical ? undefined : mascot} />}
       <strong>{name}</strong>{badge && <span className="answer-tag">{badge}</span>}
       {answer.source === 'preview' && <span className="answer-tag">Sample</span>}
-      {answer.source === 'legacy' && <span className="answer-tag">Earlier reply</span>}
     </header>
     {answer.content && <AnswerText content={answer.content} trustedLinksOnly={searching || sources.length > 0} />}
     {working && !answer.content && <div className="answer-loading" role="status">

@@ -1,27 +1,48 @@
 # Xyvora AI
 
-[Xyvora AI](https://xyvora.net) is the assistant at **xyvora.net**, powered by **Qwen 2.5**. Ask “Who are you?” or type `/about` for its name, website, and model. No account, browser model download, or WebGPU is needed. Earlier comparisons remain readable in local history.
+[Xyvora AI](https://xyvora.net) is a chat and tools workspace. **Normal** is the default for new chats. **Thinker** asks the assistant to check assumptions and explain a conclusion; **Pro** asks for practical steps and verification; **Creative** uses more varied sampling for ideas and stories. These modes change instructions and generation settings, not the underlying engine or tool permissions. Earlier conversations remain readable in local history.
 
-The welcome screen and favicon use the supplied Xyvora artwork. The frog beside the composer and Qwen replies blinks and hops on completed words without buffering the text or moving the layout. Fast words share a hop; with reduced motion enabled, the frog stays still.
+The welcome screen and animated frog keep the supplied Xyvora art. The welcome logo has a responsive HD version. Download the transparent **3840 × 1284** light and dark lockups from **About**. These are sharpened, high-resolution exports of the supplied artwork, not a new mascot or vector tracing. Reduced-motion preferences still disable the frog’s hop and blink.
 
-## Skills
+## Chat tools
 
-Open **Skills** (or `Ctrl`/`⌘` + `/`) and select a card to load an editable example. Type `/skills` to see the command list in chat, or try one of these:
+Ask naturally, or send `/tools` for examples. There are no dedicated Skills or Local time buttons.
 
-| Skill | Example | Runs on |
+| Tool | Example | Runs on |
 | --- | --- | --- |
-| Calculator | `What is 18% of 84.50?` or `/calc sqrt(81) + 3^2` | Your device |
-| Unit conversion | `/convert 72 F to C`, `/convert 2 cups to mL` (US cups) | Your device |
-| Tip and split | `/split 84.50 + 18% / 3` (USD) | Your device |
-| Calendar math | `/date 2028-02-28 + 3 days` or `/date 2028-02-28 to 2028-03-02` | Your device |
-| Text stats, JSON formatting, case changes, list cleanup | `/text`, `/json`, `/case upper`, or `/lines sort`, followed by text or with a text attachment | Your device |
-| Live clock | `What time is it?` or `/time Tokyo` | Server clock, no model |
-| Web search | `/search NASA Artemis program` or turn on the **Web search** chip | Qwen 2.5 and search indexes |
-| Writing and planning | `/summarize`, `/rewrite`, `/translate Spanish: Hello!`, `/plan learn guitar in two weeks` | Qwen 2.5 |
+| Calculator and conversions | `What is 18% of 84.50?`, `Convert 5 miles to km` | Your device |
+| Tip split and calendar math | `/split 84.50 + 18% / 3`, `/date 2028-02-28 + 3 days` | Your device |
+| Text and structured data | Attach a CSV and ask `Inspect this CSV`, or try `/json`, `/jsonpick /items/0`, `/text`, `/comparelists`, `/base64`, `/url`, `/case upper`, or `/lines unique` | Your device |
+| Live clock | `What time is it in Tokyo?` or `/time Tokyo` | Server clock, no model |
+| Web search | `/search NASA Artemis program` or enable Web search for a prompt | Server and search indexes |
+| Writing, translation, planning | `/summarize`, `/rewrite`, `/translate Spanish: Hello!`, `/plan learn guitar in two weeks` | Server |
 
-The writing tools can use pasted text or a text attachment. `/lines unique` keeps the first occurrence of each distinct non-empty line. Use the download icon in an open conversation to save its prompts, replies, and links as Markdown. Attached files themselves are not included, but a reply can contain text drawn from them.
+Attach or drop up to **three files** (4 MB each): text, code, data files, and text-based PDFs. Text extraction happens on the device. PDFs are limited to the first six pages; scanned pages need OCR beforehand. Up to 8,000 characters of combined extracted text are available to tools. The server may use a shorter excerpt to fit the chat context. Use the download icon in an open chat to export prompts, replies, and links as Markdown. File bodies aren’t exported as attachments, but replies can quote them.
 
-Web search covers the keyless, rate-limited [Wiby](https://wiby.me/json/) and [English Wikipedia](https://www.mediawiki.org/wiki/API:REST_API/Reference#Search_pages) indexes. It does not cover every site or guarantee breaking news. Qwen uses retrieved excerpts and links to the source pages; a failed lookup is not presented as a sourced answer. The clock uses the browser's time zone by default, or UTC for API requests that omit one.
+Web search uses the keyless, rate-limited [Wiby](https://wiby.me/json/) and [English Wikipedia](https://www.mediawiki.org/wiki/API:REST_API/Reference#Search_pages) indexes. The submitted search query alone goes to those indexes. The clock uses the browser’s time zone unless you ask for another, or UTC for direct API requests that omit it.
+
+## Plugins and approvals
+
+Open **Plugins** (`Ctrl`/`⌘` + `/`) or ask in chat. The current user message can open a review panel; assistant replies, attached text, and provider output never initiate an action. Nothing runs just by opening a panel.
+
+- **Script Lab** — `/run console.log(20 * 6)`. Review and run synchronous JavaScript in a QuickJS WebAssembly engine inside a disposable browser worker. No shell, packages, network, DOM, storage, or account access. Each run has a time, memory, input, and output limit. Attached text is opt-in as `input`. A complete attached `.js`/`.mjs` file can be loaded into the editor with `Run the attached JavaScript`.
+- **Image Studio** — `/image Violet mountains at dusk`. Generate and download 4K abstract posters locally, without uploading a prompt. The separate **AI images** tab can generate a 1024 × 1024 image through a configured provider. It requires explicit approval and a studio access code.
+- **API Explorer** — `/api https://api.github.com/repos/octocat/Hello-World`. Review the exact GET before sending. Only public GitHub repository and latest-release endpoints are accepted; no custom destinations, methods, headers, redirects, or keys. Only selected response fields are shown as text.
+- **Gmail** — “Show my latest Gmail messages.” Once connected, approve reading up to five inbox messages’ subject, sender, and date. No bodies, drafts, or sending.
+- **Vercel** — “List my Vercel projects.” Once connected, approve reading the profile or listing up to eight projects in the authorized context. Project access requires the provider’s resource-read grant. No deployment, project, or environment changes.
+
+Script and public API results can be placed in a draft; they are never sent to chat automatically. Account results stay in the plugin window and aren’t added to history or model context.
+
+### Configure account connections and hosted images (optional)
+
+Local chat tools, graphics, Script Lab, and the public API Explorer do not require OAuth credentials. The Arena Gmail and Vercel connections are **not** credentials for the public Xyvora app.
+
+1. Set `XYVORA_WORKSPACE_ORIGIN` to the app’s exact HTTPS origin (defaults to `https://xyvora.net`). Configure a dedicated random `XYVORA_CONNECT_SECRET` (at least 32 characters; for example `openssl rand -hex 32`). Register **`https://xyvora.net/api/workspace`** as the OAuth callback for each app, substituting your configured origin. Don’t configure production credentials on unrelated preview origins.
+2. **Gmail:** Enable the Gmail API and register a web OAuth client. Set `XYVORA_GMAIL_CLIENT_ID` and `XYVORA_GMAIL_CLIENT_SECRET`. The app asks for the restricted [`gmail.metadata` scope](https://developers.google.com/workspace/gmail/api/auth/scopes); use configured test users until the consent screen, required verification, and applicable security requirements are completed.
+3. **Vercel:** Register a [Sign in with Vercel app](https://vercel.com/docs/sign-in-with-vercel) configured for `openid` and `profile`, with a client secret. Set `XYVORA_VERCEL_CLIENT_ID` and `XYVORA_VERCEL_CLIENT_SECRET`. If your app has access to [resource permissions](https://vercel.com/docs/sign-in-with-vercel/scopes-and-permissions), grant only **read** access to Projects for project listing. Profile sign-in alone does not authorize the Projects API.
+4. **Hosted images:** Set `XYVORA_IMAGE_API_KEY` to a dedicated OpenAI project key with Images permission and `XYVORA_IMAGE_ACCESS_CODE` to a separate random code, at least 24 characters. Configure provider spend controls before enabling. Only the approved prompt is sent. The local rate limiter is **per instance**, not a shared spend cap. Don’t publish the access code or share any setup secrets in chat.
+
+Set values as sensitive server environment variables in Vercel and redeploy. Do not use a `VITE_` prefix. The service stays disabled for a provider until it is configured for the current origin. OAuth uses PKCE and state; access tokens are encrypted/authenticated in host-only, HttpOnly, Secure cookies for at most an hour. No refresh tokens are kept. Disconnect clears the browser session and attempts provider revocation; permanent grants can also be removed in the provider’s account settings.
 
 ## Run locally
 
@@ -30,33 +51,35 @@ npm ci --ignore-scripts
 npm run dev
 ```
 
-The local interface preview uses labeled sample replies. On-device skills and the live clock still work. Set `XYVORA_SERVER_MODELS=1` in `.env.local` for live Qwen inference and Web search. This needs a supported `node-llama-cpp` CPU binding and outbound access to the model/search hosts. Run `npm run build:models` to stage the pinned weights before the first request, or let the first local live request download them.
+The local preview uses labeled sample replies. The built-in tools, clock, script sandbox, file input, and local graphics work there. Set `XYVORA_SERVER_MODELS=1` in `.env.local` for live inference and Web search. This needs a supported `node-llama-cpp` CPU binding and access to the model/search hosts. Run `npm run build:models` to stage the verified weights, or let the first local live request download them.
 
 ## Deploy to Vercel
 
-Use the **xyvora-ai** project with **xyvora.net** as its production domain. `vercel.json` configures the Vite build, the Node function, and the CPU-only install. No Gateway credentials or other models are used.
+Use **xyvora-ai** with **xyvora.net** as its production domain. `vercel.json` configures the Vite build and two Node functions. The small workspace function never imports the chat engine. If deploying via a source bootstrap, include both `api/chat.js` and `api/workspace.js` before extracting the pinned checkout so function discovery can see them.
 
-- The build verifies a compact Q4_0 GGUF of Apache-2.0 [Qwen 2.5 0.5B Instruct](https://huggingface.co/bartowski/Qwen2.5-0.5B-Instruct-GGUF), pinned to a revision and checksum. Only the Qwen file ships with the server, not with the client or in Git. The function maps the weights locally and reuses its native inference context and only the fixed system-prompt prefix. Request, clock, and web tokens are discarded between requests. Up to two CPU threads are used when available.
-- The artifact exceeds the standard bundle limit; use [Large Functions](https://vercel.com/docs/functions/limitations#large-functions) with Fluid compute and Active CPU. Older projects may need `VERCEL_SUPPORT_LARGE_FUNCTIONS=1`. `npm run build` works without downloading the weights; `npm run build:models` stages them separately.
-- Vercel compute/transfer limits and the search provider's rate limits still apply. The API limits requests, lookup duration, context, and output. Use project spend controls and shared rate limits before operating at public scale.
+- The backend uses a compact Q4_0 GGUF of Apache-2.0 [Qwen 2.5 0.5B Instruct](https://huggingface.co/bartowski/Qwen2.5-0.5B-Instruct-GGUF), pinned to a revision and checksum. No weights are sent to browsers or checked into Git. The function maps its verified weights and reuses only the fixed system-prompt prefix between requests.
+- The weights exceed the standard bundle limit; use [Large Functions](https://vercel.com/docs/functions/limitations#large-functions) with Fluid compute and Active CPU. Older projects may need `VERCEL_SUPPORT_LARGE_FUNCTIONS=1`. `npm run build` needs no weight download; `npm run build:models` stages weights separately.
+- The asset bundle lazy-loads Markdown, plugins, the PDF parser, and the script worker. Its one WASM file is the local JavaScript sandbox, **not** a model or inference runtime. Production has a same-origin Content Security Policy.
 
-## Privacy
+## Privacy and API
 
-Chat history is stored in the browser. On-device skill turns do not make a chat request and are skipped in any later context sent to Qwen. For other replies, the server can receive the prompt, limited recent context, any attached text, and the browser time zone; it does not persist the chat. Only an explicitly requested search sends its search terms to Wiby and Wikipedia, not history, attachments, or your time zone. Do not include private information in a search. Source links provide attribution, including to Wikipedia contributors and [CC BY-SA licensing](https://en.wikipedia.org/wiki/Wikipedia:Copyrights).
+Chat history stays in the browser. On-device tool turns are skipped in future requests. Ordinary replies can send the prompt, limited recent context, extracted attachment text, and browser time zone to the server. Don’t put private data in search queries. Source links provide attribution, including Wikipedia’s [CC BY-SA license](https://en.wikipedia.org/wiki/Wikipedia:Copyrights).
 
-## Chat API
+`GET /api/chat` reports Xyvora’s identity, modes, tools, and availability. `POST /api/chat` accepts alternating `messages` ending with a user message, optional `model: "xyvora"`, `mode` (`normal`, `thinker`, `pro`, `creative`), `timeZone`, `searchQuery`, and `attachment: {name, text}`. Older requests and saved chats still work. Replies stream as SSE with `[DONE]` on success. `X-Xyvora-Source` and `X-Xyvora-Skill` report the reply’s origin.
 
-`GET /api/chat` reports the assistant's name and site, the available model and skill IDs, and whether web search is available. `POST /api/chat` accepts `model: "qwen-lite"`, alternating `messages` ending with a user message, and optional `timeZone`, `searchQuery`, and `attachment: {name, text}`. Commands work in the last user message. Replies stream as SSE and end with `[DONE]` on success. `X-Xyvora-Source` identifies model, preview, clock, or built-in skill replies; clock and skill replies also set `X-Xyvora-Skill`.
+`GET /api/workspace` reports connection and hosted image availability or completes an OAuth state/code callback. `POST /api/workspace` accepts only same-origin JSON with `approved: true`; separate checks enforce the request registry, account session, provider configuration, and size and rate limits. Plugins cannot send arbitrary API calls, write to connected accounts, or access the chat model.
 
 ## Checks
 
 ```sh
 npm test
 npm run build
-node --experimental-strip-types scripts/smoke-chat.mjs https://xyvora.net --benchmark
+node --experimental-strip-types scripts/smoke-chat.mjs https://xyvora.net
 ```
 
-The public smoke test verifies real Qwen streams, Xyvora’s identity, calculator and clock output, and external sources. `--benchmark` repeats short prompts and times a longer reply, separating first visible text from completion. After building and staging the weights locally, `VERCEL=1 node --experimental-strip-types scripts/check-bundle.mjs` exercises the bundled handler, tool dispatch, native workflow generation, and cancellation without HTTP or model downloads; add `--search` to check both external indexes.
+After staging the weights, `VERCEL=1 node --experimental-strip-types scripts/check-bundle.mjs` checks the actual bundled handlers, native modes, tools, and cancellation. `--search` tests the real search indexes and `--plugins` runs one real read-only API Explorer GET. OAuth and hosted-image tests use fixture provider responses; actual consent and paid image generation require separate credentials. There are no account credentials in fixtures.
+
+## Previous release measurements
 
 ### Live latency sample
 

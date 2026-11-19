@@ -1,7 +1,8 @@
+import type { ReplyMode } from '../shared/modes.ts';
 import type { ChatMessage } from '../shared/models.ts';
 import type { WebSource } from '../shared/search.ts';
 
-export type Evidence = { clock?: string; sources?: WebSource[] };
+export type Evidence = { mode?: ReplyMode; clock?: string; sources?: WebSource[] };
 export type ServerGenerate = (messages: ChatMessage[], signal: AbortSignal, onText: (text: string) => void, evidence: Evidence) => Promise<void>;
 
 type StreamOutput = { text: (value: string) => void; sources: (value: WebSource[]) => void };

@@ -1,3 +1,4 @@
+import { MODE_IDS } from '../shared/modes.ts';
 import assert from 'node:assert/strict';
 import { readChatEvents } from '../src/lib/stream.ts';
 import { ASSISTANT_PROFILE, DEFAULT_MODEL } from '../shared/models.ts';
@@ -9,7 +10,7 @@ const benchmark = process.argv.includes('--benchmark');
 const url = new URL('/api/chat', target);
 const status = await fetch(url, { signal: AbortSignal.timeout(10_000) });
 assert.ok(status.ok, `Chat status returned HTTP ${status.status}`);
-assert.deepEqual(await status.json(), { assistant: ASSISTANT_PROFILE, availability: 'server', models: [DEFAULT_MODEL], webSearch: true, skills: SKILL_IDS });
+assert.deepEqual(await status.json(), { assistant: ASSISTANT_PROFILE, availability: 'server', models: [DEFAULT_MODEL], webSearch: true, modes: MODE_IDS, skills: SKILL_IDS });
 
 async function check(label, content, expected, { timeZone, searchQuery, source = 'server', skill } = {}) {
   const startedAt = performance.now();
@@ -50,7 +51,7 @@ for (let i = 0; i < (benchmark ? 5 : 1); i++) {
 if (benchmark) {
   await check('long', 'Give five practical tips for packing light for a weekend trip. Use a numbered list with one sentence per tip.', /pack|wear|layer|cloth/i);
 }
-await check('identity', 'Who are you?', /Xyvora AI.*xyvora\.net.*Qwen 2\.5/, { source: 'skill', skill: 'about' });
+await check('identity', 'Who are you?', /Xyvora AI.*xyvora\.net/, { source: 'skill', skill: 'about' });
 await check('calculator', 'What is 18% of 84.50?', /15\.21/, { source: 'skill', skill: 'calc' });
 await check('clock', '/time', /\d{1,2}:\d{2}.*America\/Chicago/, { timeZone: 'America/Chicago', source: 'clock', skill: 'time' });
 await check('search', 'What is NASA’s Artemis program?', /artemis|nasa|moon/i, { searchQuery: 'NASA Artemis program' });

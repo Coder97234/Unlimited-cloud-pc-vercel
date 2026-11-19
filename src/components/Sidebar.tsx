@@ -1,14 +1,14 @@
 import {
-  Clock3, Columns2, FolderOpen, Globe, MessageSquare, PanelLeftClose, Plus, Search, Settings2, Trash2, UserRound, Zap,
+  Blocks, Clock3, Columns2, FolderOpen, Globe, ImagePlus, MessageSquare, PanelLeftClose, Plus, Search, Settings2, Trash2, UserRound,
 } from 'lucide-react';
-import { MODEL_NAME, XYVORA_NAME } from '../../shared/models.ts';
+import { XYVORA_NAME } from '../../shared/models.ts';
 import type { Availability } from '../../shared/models.ts';
 import type { Thread } from '../lib/history.ts';
 import { Mascot } from './Brand.tsx';
 
-export function Sidebar({ threads, activeId, availability, onNew, onSearch, onSkills, onWebSearch, onClock, onSettings, onCollapse, onThread, onDelete, onAbout }: {
+export function Sidebar({ threads, activeId, availability, onNew, onSearch, onPlugins, onWebSearch, onImage, onSettings, onCollapse, onThread, onDelete, onAbout }: {
   threads: Thread[]; activeId: string | null; availability: Availability | 'loading';
-  onNew: () => void; onSearch: () => void; onSkills: () => void; onWebSearch: () => void; onClock: () => void;
+  onNew: () => void; onSearch: () => void; onPlugins: () => void; onWebSearch: () => void; onImage: () => void;
   onSettings: () => void; onCollapse: () => void; onThread: (thread: Thread) => void;
   onDelete: (thread: Thread) => void; onAbout: () => void;
 }) {
@@ -25,9 +25,9 @@ export function Sidebar({ threads, activeId, availability, onNew, onSearch, onSk
       <button className="search-trigger nav-button" type="button" onClick={onSearch}><Search size={17} /><span>Search chats</span><kbd>{mac ? '⌘ K' : 'Ctrl K'}</kbd></button>
       <nav className="workspace-nav" aria-label="Workspace">
         <div className="sidebar-label">WORKSPACE</div>
-        <button type="button" className="nav-button" onClick={onSkills}><Zap size={17} /><span>Skills</span></button>
+        <button type="button" className="nav-button" onClick={onPlugins}><Blocks size={17} /><span>Plugins</span></button>
         <button type="button" className="nav-button" onClick={onWebSearch}><Globe size={17} /><span>Web search</span></button>
-        <button type="button" className="nav-button" onClick={onClock}><Clock3 size={17} /><span>Time and date</span></button>
+        <button type="button" className="nav-button" onClick={onImage}><ImagePlus size={17} /><span>Image Studio</span></button>
       </nav>
       <section className="history-section" aria-label="Recent chats">
         <div className="sidebar-label history-title">RECENT CHATS <Clock3 size={13} /></div>
@@ -46,7 +46,7 @@ export function Sidebar({ threads, activeId, availability, onNew, onSearch, onSk
     <div className="sidebar-bottom">
       <button type="button" className="sidebar-status" onClick={onAbout}>
         <span className={`status-dot status-${availability}`} />
-        {availability === 'preview' ? 'Preview mode' : availability === 'unavailable' ? 'Chat connection unavailable' : availability === 'loading' ? 'Connecting to chat…' : `Powered by ${MODEL_NAME}`}
+        {availability === 'preview' ? 'Preview mode' : availability === 'unavailable' ? 'Chat connection unavailable' : availability === 'loading' ? 'Connecting to chat…' : 'Chat ready'}
       </button>
       <button type="button" className="workspace-settings" onClick={onSettings} aria-label="Workspace settings">
         <span className="workspace-avatar" aria-hidden="true"><UserRound size={16} /></span>

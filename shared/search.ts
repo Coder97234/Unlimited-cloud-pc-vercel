@@ -1,3 +1,4 @@
+import { workspaceIntent } from './workspace-tools.ts';
 import { directInfoSkill, readSkillCommand } from './skill-catalog.ts';
 
 export const MAX_SEARCH_QUERY = 350;
@@ -10,7 +11,7 @@ export function explicitSearchQuery(prompt: string): string | undefined {
 }
 
 export function allowsSearchToggle(prompt: string) {
-  return !readSkillCommand(prompt) && !directInfoSkill(prompt);
+  return !readSkillCommand(prompt) && !directInfoSkill(prompt) && !workspaceIntent(prompt);
 }
 
 export function chatSearchQuery(prompt: string, searchEnabled: boolean) {

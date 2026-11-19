@@ -1,5 +1,6 @@
+import { MODE_IDS } from '../shared/modes.ts';
 import assert from 'node:assert/strict';
-import { ASSISTANT_PROFILE } from '../shared/models.ts';
+import { ASSISTANT_PROFILE, DEFAULT_MODEL } from '../shared/models.ts';
 import { SKILL_IDS } from '../shared/skill-catalog.ts';
 import { test } from 'node:test';
 import vercelChat from '../server/vercel-chat.ts';
@@ -7,13 +8,12 @@ import { handleChat, parseChat } from '../server/chat.ts';
 import { InferenceError } from '../server/inference-stream.ts';
 import { WIBY_SEARCH_URL, WIKI_SEARCH_URL, searchWeb } from '../server/web-search.ts';
 import { buildMessages, loadThreads } from '../src/lib/history.ts';
-import type { Turn } from '../src/lib/history.ts';
 import { readChatEvents } from '../src/lib/stream.ts';
 import type { WebSource } from '../shared/search.ts';
 
 const url = 'https://xyvora.invalid/api/chat';
 const message = { role: 'user', content: 'What is recursion?' };
-const body = { model: 'qwen-lite', messages: [message] };
+const body = { model: DEFAULT_MODEL, messages: [message] };
 const source: WebSource = { title: 'Artemis', url: 'https://www.nasa.gov/humans-in-space/artemis/', excerpt: 'NASA’s Moon exploration program.' };
 function request(input: unknown = body) {
   return new Request(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) });
@@ -25,10 +25,10 @@ async function collect(response: Response) {
   return { text, sources };
 }
 
-test('accepts only Qwen 2.5 with bounded alternating user and assistant messages', () => {
-  assert.deepEqual(parseChat(body), { messages: [message], timeZone: 'UTC', query: undefined });
+test('accepts the workspace model with bounded alternating user and assistant messages', () => {
+  assert.deepEqual(parseChat(body), { messages: [message], timeZone: 'UTC', query: undefined, mode: 'normal' });
   for (const model of ['local', 'qwen', 'smollm', 'gpt-oss', 'mistral', 'toString', 'https://example.org']) {
-    assert.throws(() => parseChat({ ...body, model }), /only supported model/);
+    assert.throws(() => parseChat({ ...body, model }), /supported Xyvora model/);
   }
   assert.throws(() => parseChat({ ...body, messages: [{ role: 'system', content: 'hello' }] }), /roles/);
   assert.throws(() => parseChat({ ...body, messages: [message, message] }), /ending with a user/);
@@ -44,9 +44,9 @@ test('a missing backend never looks like successful inference', async () => {
   assert.equal((await reply.json()).code, 'MODEL_UNAVAILABLE');
 });
 
-test('Vercel advertises the Xyvora identity, skills, and only Qwen 2.5, regardless of old Gateway headers', async () => {
+test('Vercel advertises only the Xyvora identity, modes, and built-in tools, regardless of old Gateway headers', async () => {
   const reply = await vercelChat.fetch(new Request(url, { headers: { 'x-vercel-oidc-token': 'mock-runtime-token' } }));
-  assert.deepEqual(await reply.json(), { assistant: ASSISTANT_PROFILE, availability: 'server', models: ['qwen-lite'], webSearch: true, skills: SKILL_IDS });
+  assert.deepEqual(await reply.json(), { assistant: ASSISTANT_PROFILE, availability: 'server', models: [DEFAULT_MODEL], webSearch: true, modes: MODE_IDS, skills: SKILL_IDS });
   assert.equal((await vercelChat.fetch(request({ ...body, model: 'smollm' }))).status, 400);
 });
 
@@ -75,7 +75,7 @@ test('stream parser handles split CRLF and multibyte frames, validating source m
   assert.deepEqual(await collect(new Response(stream)), { text: 'héllo', sources: [source] });
 });
 
-test('streams Qwen text immediately and does not search on normal prompts', async () => {
+test('streams native reply text immediately and does not search on normal prompts', async () => {
   let finish!: () => void;
   const completion = new Promise<void>((resolve) => { finish = resolve; });
   const response = await handleChat(request(), {
@@ -209,8 +209,8 @@ test('canceling a stream aborts generation and external lookup', async () => {
   }
 });
 
-test('retains older replies but sends only completed Qwen context to new requests', (t) => {
-  const previous: Turn[] = [
+test('retains older replies but sends only completed chat context to new requests', (t) => {
+  const previous = [
     { id: 'q', prompt: 'Hello', answers: [{ model: 'qwen-lite', source: 'server', state: 'finished', content: 'Hi there!' }] },
     { id: 's', prompt: 'Earlier question', answers: [{ model: 'smollm', source: 'legacy', state: 'finished', content: 'An archived reply' }] },
   ];

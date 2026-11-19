@@ -5,7 +5,6 @@ import { dirname, join } from 'node:path';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type { ReadableStream as NodeReadableStream } from 'node:stream/web';
-import { DEFAULT_MODEL } from '../shared/models.ts';
 
 export type WeightSpec = { url: string; size: number; sha256: string };
 
@@ -17,7 +16,7 @@ export const MODEL_WEIGHT = {
 } satisfies WeightSpec;
 
 export function packagedWeightPath() {
-  return join(process.cwd(), 'build', 'models', `${DEFAULT_MODEL}.gguf`);
+  return join(process.cwd(), 'build', 'models', 'qwen-lite.gguf');
 }
 
 export async function hasExpectedSize(path: string, spec: WeightSpec) {

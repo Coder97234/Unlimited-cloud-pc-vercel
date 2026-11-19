@@ -1,4 +1,6 @@
-import { ASSISTANT_PROFILE, DEFAULT_MODEL, MAX_ATTACHMENT, MAX_CONTEXT, MAX_MESSAGES, REPLY_SKILL_HEADER, REPLY_SOURCE_HEADER, withAttachment } from '../shared/models.ts';
+import { DEFAULT_MODE, isReplyMode, MODE_IDS } from '../shared/modes.ts';
+import { brandedStream } from '../shared/branding.ts';
+import { ASSISTANT_PROFILE, DEFAULT_MODEL, MAX_ATTACHMENT, MAX_CONTEXT, MAX_MESSAGES, MAX_PROMPT, REPLY_SKILL_HEADER, REPLY_SOURCE_HEADER, withAttachment } from '../shared/models.ts';
 import type { Availability, ChatMessage, ReplySource, TextAttachment } from '../shared/models.ts';
 import { allowsSearchToggle, explicitSearchQuery, MAX_SEARCH_QUERY } from '../shared/search.ts';
 import { SKILL_IDS, skillAvailable } from '../shared/skill-catalog.ts';
@@ -72,8 +74,10 @@ function parseAttachment(value: unknown): TextAttachment | undefined {
 
 export function parseChat(input: unknown) {
   if (typeof input !== 'object' || input === null) throw new InvalidInput('A message is required.');
-  const { model, messages, timeZone = 'UTC', searchQuery, attachment: rawAttachment } = input as Record<string, unknown>;
-  if (model !== DEFAULT_MODEL) throw new InvalidInput('Qwen 2.5 is the only supported model. Refresh Xyvora and try again.');
+  const { model = DEFAULT_MODEL, mode = DEFAULT_MODE, messages, timeZone = 'UTC', searchQuery, attachment: rawAttachment } = input as Record<string, unknown>;
+  // Accept requests from the preceding client during rollout, but never advertise the old ID.
+  if (model !== DEFAULT_MODEL && model !== 'qwen-lite') throw new InvalidInput('Send a supported Xyvora model ID.');
+  if (!isReplyMode(mode)) throw new InvalidInput('Select a supported reply mode.');
   if (!validTimeZone(timeZone)) throw new InvalidInput('Send a valid IANA time zone, or omit it to use UTC.');
   if (!Array.isArray(messages) || messages.length === 0 || messages.length > MAX_MESSAGES || messages.length % 2 === 0) {
     throw new InvalidInput('Send a conversation ending with a user message.');
@@ -90,6 +94,7 @@ export function parseChat(input: unknown) {
     return { role, content };
   });
   const prompt = cleaned.at(-1)!.content;
+  if (prompt.length > MAX_PROMPT) throw new InvalidInput('Your message is too long. Shorten the prompt and try again.', 413);
   const attachment = parseAttachment(rawAttachment);
   const rawQuery = explicitSearchQuery(prompt) ?? (searchQuery !== undefined && allowsSearchToggle(prompt) ? searchQuery : undefined);
   let query: string | undefined;
@@ -99,7 +104,7 @@ export function parseChat(input: unknown) {
     }
     query = rawQuery.replace(/\s+/g, ' ').trim();
   }
-  return { messages: cleaned, timeZone, query, ...(attachment && { attachment }) };
+  return { messages: cleaned, timeZone, query, mode, ...(attachment && { attachment }) };
 }
 
 // Best-effort limit per function instance; this is not a shared public quota.
@@ -135,7 +140,7 @@ export async function handleChat(request: Request, options: ChatOptions = {}): P
   const availability: Availability = options.generate ? 'server' : options.preview ? 'preview' : 'unavailable';
   if (request.method === 'GET') {
     const webSearch = !!(options.search && options.generate);
-    return json({ assistant: ASSISTANT_PROFILE, availability, models: availability === 'unavailable' ? [] : [DEFAULT_MODEL], webSearch,
+    return json({ assistant: ASSISTANT_PROFILE, availability, models: availability === 'unavailable' ? [] : [DEFAULT_MODEL], webSearch, modes: MODE_IDS,
       skills: SKILL_IDS.filter((id) => skillAvailable(id, !!options.generate, webSearch)) });
   }
   if (request.method !== 'POST') return json({ error: 'Method not allowed.' }, 405, { Allow: 'GET, POST' });
@@ -172,8 +177,8 @@ export async function handleChat(request: Request, options: ChatOptions = {}): P
   const { generate, search } = options;
   if (input.query && (!search || !generate)) return json({ error: 'Live web search is not available in this environment.', code: 'SEARCH_UNAVAILABLE' }, 503);
   if (!generate) {
-    if (options.preview) return reply(previewResponse(modelPrompt, request.signal), 'preview');
-    return json({ error: 'Qwen 2.5 is unavailable. Please try again.', code: 'MODEL_UNAVAILABLE' }, 503);
+    if (options.preview) return reply(previewResponse(modelPrompt, request.signal, input.mode), 'preview');
+    return json({ error: 'Xyvora replies are unavailable. Please try again.', code: 'MODEL_UNAVAILABLE' }, 503);
   }
 
   return reply(inferenceStream(async (signal, output) => {
@@ -181,10 +186,12 @@ export async function handleChat(request: Request, options: ChatOptions = {}): P
     if (sources) {
       output.sources(sources.map(({ title, url, provider }) => ({ title, url, provider })));
       if (sources.length === 0) {
-        output.text('I couldn’t find relevant web results. Try a more specific search, or turn off Web search to ask Qwen directly.');
+        output.text('I couldn’t find relevant web results. Try a more specific search, or turn off Web search to ask Xyvora directly.');
         return;
       }
     }
-    await generate(messages, signal, output.text, { sources, clock: contextualClock(prompt, input.timeZone, now) });
+    const branded = brandedStream(output.text);
+    await generate(messages, signal, branded.text, { sources, clock: contextualClock(prompt, input.timeZone, now), mode: input.mode });
+    branded.finish();
   }, request.signal), 'server');
 }

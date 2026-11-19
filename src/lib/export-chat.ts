@@ -2,7 +2,7 @@ import { XYVORA_NAME, XYVORA_URL } from '../../shared/models.ts';
 import { normalizeSources } from '../../shared/search.ts';
 import { skillName } from '../../shared/skill-catalog.ts';
 import { fencedText } from '../../shared/text-tools.ts';
-import { SAVED_MODEL_NAMES } from './history.ts';
+import { DEFAULT_MODE, MODES } from '../../shared/modes.ts';
 import type { Thread } from './history.ts';
 
 const oneLine = (text: string) => text.replace(/[\r\n]+/g, ' ').trim();
@@ -13,8 +13,8 @@ export function conversationMarkdown(thread: Thread) {
     parts.push('## You', fencedText(turn.prompt));
     if (turn.attachment) parts.push(`Attachment name (contents not exported):\n\n${fencedText(oneLine(turn.attachment.name))}`);
     for (const answer of turn.answers) {
-      const label = thread.mode === 'compare' || answer.source === 'legacy' ? SAVED_MODEL_NAMES[answer.model]
-        : answer.skill ? skillName(answer.skill) : answer.source === 'clock' ? 'Live clock' : SAVED_MODEL_NAMES[answer.model];
+      const label = thread.mode === 'compare' || answer.source === 'legacy' ? 'Earlier reply'
+        : answer.skill ? skillName(answer.skill) : answer.source === 'clock' ? 'Live clock' : MODES[answer.replyMode ?? DEFAULT_MODE].name;
       parts.push(`### ${XYVORA_NAME} · ${label}${answer.source === 'preview' ? ' (sample)' : ''}`);
       if (answer.content) parts.push(answer.content);
       if (answer.state !== 'finished') parts.push(`*Reply ${answer.state === 'error' ? 'did not complete' : 'was interrupted'}.*`);

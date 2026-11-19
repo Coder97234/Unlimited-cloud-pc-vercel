@@ -1,3 +1,5 @@
+import { brandedStream } from '../../shared/branding.ts';
+import type { ReplyMode } from '../../shared/modes.ts';
 import { DEFAULT_MODEL, REPLY_SKILL_HEADER, REPLY_SOURCE_HEADER } from '../../shared/models.ts';
 import type { ChatMessage, ReplySource, TextAttachment } from '../../shared/models.ts';
 import { normalizeSources } from '../../shared/search.ts';
@@ -19,11 +21,11 @@ export async function readChatEvents(body: ReadableStream<Uint8Array>, onText: (
     if (data.trim() === '[DONE]') { ended = true; return; }
     let payload: { error?: unknown; sources?: unknown; choices?: { delta?: { content?: unknown }; finish_reason?: string }[] };
     try { payload = JSON.parse(data); }
-    catch { throw new ChatError('The model sent an unreadable response. Try again.'); }
+    catch { throw new ChatError('Xyvora sent an unreadable response. Try again.'); }
     const choice = payload?.choices?.[0];
     if (payload?.error || choice?.finish_reason === 'error') {
       const message = (payload?.error as { message?: unknown } | undefined)?.message;
-      throw new ChatError(showServerError && typeof message === 'string' ? message : 'The model hit an error while responding. Try again.');
+      throw new ChatError(showServerError && typeof message === 'string' ? message : 'Xyvora couldn’t finish the reply. Try again.');
     }
     if (Array.isArray(payload?.sources)) onSources?.(normalizeSources(payload.sources));
     if (choice?.finish_reason) finish = true;
@@ -39,7 +41,7 @@ export async function readChatEvents(body: ReadableStream<Uint8Array>, onText: (
         consume(buffer.slice(0, separator.index));
         buffer = buffer.slice(separator.index + separator[0].length);
       }
-      if (buffer.length > 100_000) throw new ChatError('The model sent an unreadable response. Try again.');
+      if (buffer.length > 100_000) throw new ChatError('Xyvora sent an unreadable response. Try again.');
     }
     if (!ended && !finish) throw new ChatError('The connection ended before the reply finished. You can try again.');
   } finally {
@@ -49,6 +51,7 @@ export async function readChatEvents(body: ReadableStream<Uint8Array>, onText: (
 }
 
 export async function streamChat(messages: ChatMessage[], signal: AbortSignal, options: {
+  mode?: ReplyMode;
   searchQuery?: string;
   attachment?: TextAttachment;
   onText: (delta: string) => void;
@@ -58,7 +61,7 @@ export async function streamChat(messages: ChatMessage[], signal: AbortSignal, o
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const response = await fetch('/api/chat', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: DEFAULT_MODEL, messages, timeZone, searchQuery: options.searchQuery, attachment: options.attachment }), signal,
+    body: JSON.stringify({ model: DEFAULT_MODEL, mode: options.mode, messages, timeZone, searchQuery: options.searchQuery, attachment: options.attachment }), signal,
   });
   if (!response.ok || !response.body || !response.headers.get('content-type')?.includes('text/event-stream')) {
     const data = await response.json().catch(() => null);
@@ -67,5 +70,8 @@ export async function streamChat(messages: ChatMessage[], signal: AbortSignal, o
   const source = response.headers.get(REPLY_SOURCE_HEADER);
   const skill = response.headers.get(REPLY_SKILL_HEADER);
   if (source === 'server' || source === 'preview' || source === 'clock' || source === 'skill') options.onSource(source, isSkillResultId(skill) ? skill : undefined);
-  await readChatEvents(response.body, options.onText, source !== 'preview', options.onSources);
+  const branded = brandedStream(options.onText);
+  const filter = source === 'server' || !source;
+  await readChatEvents(response.body, filter ? branded.text : options.onText, source !== 'preview', options.onSources);
+  if (filter) branded.finish();
 }

@@ -1,6 +1,8 @@
+import { compareLists, csvSummary, encodeText, jsonPointer } from './data-tools.ts';
+import { PLUGINS, workspaceIntent } from './workspace-tools.ts';
 import { calculate, naturalCalculation } from './calculator.ts';
 import { conversionArgument, convert } from './convert.ts';
-import { MAX_ATTACHMENT, MAX_CONTEXT, MODEL_NAME, XYVORA_NAME, XYVORA_SITE, XYVORA_URL, withAttachment } from './models.ts';
+import { MAX_ATTACHMENT, MAX_CONTEXT, XYVORA_NAME, XYVORA_SITE, XYVORA_URL, withAttachment } from './models.ts';
 import type { TextAttachment } from './models.ts';
 import { directInfoSkill, normalizeQuestion, readSkillCommand, SKILLS, SKILL_IDS } from './skill-catalog.ts';
 import type { SkillResultId } from './skill-catalog.ts';
@@ -78,12 +80,14 @@ function translationParts(argument: string, hasAttachment: boolean) {
   return { target, material };
 }
 
-const identity = `I’m **${XYVORA_NAME}**, the AI assistant at [${XYVORA_SITE}](${XYVORA_URL}). I’m powered by **${MODEL_NAME}**.`;
+const identity = `I’m **${XYVORA_NAME}**, the AI assistant at [${XYVORA_SITE}](${XYVORA_URL}).`;
 const calendarQuestion = /^(?:(?:how many )?days (?:are there )?between |what day (?:of the week )?is )(.+)$/i;
 
 export type InstantResult = { id: SkillResultId; text: string };
 export function runInstantSkill(prompt: string, attachedText?: string): InstantResult | undefined {
   if (prompt.length > MAX_CONTEXT || (attachedText?.length ?? 0) > MAX_ATTACHMENT) return;
+  const external = workspaceIntent(prompt);
+  if (external) return { id: 'skills', text: `Open **${PLUGINS[external.id].name}** in the Xyvora workspace to review and run this request. I haven’t run it here.` };
   const explicit = readSkillCommand(prompt);
   let id = explicit?.id ?? directInfoSkill(prompt);
   let argument = explicit?.argument ?? '';
@@ -98,12 +102,22 @@ export function runInstantSkill(prompt: string, attachedText?: string): InstantR
       if (arithmetic) { id = 'calc'; argument = arithmetic; }
     }
   }
+  if (!id) {
+    const text = normalizeQuestion(prompt);
+    if (/^(?:please )?(?:inspect|analy[sz]e|count (?:the )?rows (?:in|of))(?: this| the| my)? (?:attached )?csv(?: file)?$/i.test(text)) id = 'csv';
+    else if (/^(?:please )?(?:format|validate|pretty print)(?: this| the| my)? (?:attached )?json(?: file)?$/i.test(text)) id = 'json';
+    else if (/^(?:please )?count (?:the )?words in (?:this|the|my) (?:attached )?(?:text|file|document)$/i.test(text)) id = 'text';
+  }
   switch (id) {
-    case 'about': return { id, text: `${identity} I can help you write, learn, search the web, and use built-in tools. Try \`/skills\` to see what’s available.` };
-    case 'skills': return { id, text: `${identity}\n\nHere are the tools on ${XYVORA_SITE}:\n\n${SKILL_IDS.filter((key) => key !== 'about').map((key) => `- **${SKILLS[key].name}** · \`/${key}\` — ${SKILLS[key].description}`).join('\n')}\n\nOpen **Skills** for editable examples. You can also download this conversation as Markdown.` };
+    case 'about': return { id, text: `${identity} I can help you write, learn, search the web, and use built-in tools. Try \`/tools\` to see what’s available.` };
+    case 'skills': return { id, text: `${identity}\n\nHere are the tools on ${XYVORA_SITE}:\n\n${SKILL_IDS.filter((key) => key !== 'about').map((key) => `- **${SKILLS[key].name}** · \`/${key}\` — ${SKILLS[key].description}`).join('\n')}\n\n**Plugins (review before running):**\n${Object.values(PLUGINS).map((plugin) => `- **${plugin.name}** · \`${plugin.example}\``).join('\n')}` };
     case 'calc': return { id, text: calculate(argument) };
     case 'convert': return { id, text: convert(argument) };
     case 'split': return { id, text: splitBill(argument) };
+    case 'csv': return { id, text: csvSummary(argument || attachedText || '') };
+    case 'jsonpick': return { id, text: jsonPointer(argument, attachedText) };
+    case 'url': case 'base64': return { id, text: encodeText(id, argument, attachedText) };
+    case 'comparelists': return { id, text: compareLists(argument || attachedText || '') };
     case 'date': return { id, text: calendar(argument) };
     case 'text': return { id, text: textStats(argument || attachedText || '') };
     case 'json': return { id, text: formatJson(argument || attachedText || '') };
@@ -124,8 +138,8 @@ export function modelMessage(prompt: string, attachment?: TextAttachment) {
     const translation = translationParts(command.argument, !!attachment);
     if (translation) {
       const { target, material } = translation;
-      const text = [material, attachment?.text].filter(Boolean).join('\n\n');
-      return `Translate the following text into ${target}. Return only the translation in ${target}.\n\n${text}`;
+      const instruction = `Translate the following text into ${target}. Return only the translation in ${target}.`;
+      return withAttachment(material ? `${instruction}\n\n${material}` : instruction, attachment);
     }
   }
   if (!command || !Object.hasOwn(workflows, command.id)) return withAttachment(prompt, attachment);
