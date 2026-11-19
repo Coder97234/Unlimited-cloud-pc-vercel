@@ -1,7 +1,9 @@
-import { DEFAULT_MODEL, REPLY_SOURCE_HEADER } from '../../shared/models.ts';
-import type { ChatMessage, ReplySource } from '../../shared/models.ts';
+import { DEFAULT_MODEL, REPLY_SKILL_HEADER, REPLY_SOURCE_HEADER } from '../../shared/models.ts';
+import type { ChatMessage, ReplySource, TextAttachment } from '../../shared/models.ts';
 import { normalizeSources } from '../../shared/search.ts';
 import type { WebSource } from '../../shared/search.ts';
+import { isSkillResultId } from '../../shared/skill-catalog.ts';
+import type { SkillResultId } from '../../shared/skill-catalog.ts';
 
 export class ChatError extends Error {}
 
@@ -48,20 +50,22 @@ export async function readChatEvents(body: ReadableStream<Uint8Array>, onText: (
 
 export async function streamChat(messages: ChatMessage[], signal: AbortSignal, options: {
   searchQuery?: string;
+  attachment?: TextAttachment;
   onText: (delta: string) => void;
-  onSource: (source: ReplySource) => void;
+  onSource: (source: ReplySource, skill?: SkillResultId) => void;
   onSources: (sources: WebSource[]) => void;
 }) {
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const response = await fetch('/api/chat', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: DEFAULT_MODEL, messages, timeZone, searchQuery: options.searchQuery }), signal,
+    body: JSON.stringify({ model: DEFAULT_MODEL, messages, timeZone, searchQuery: options.searchQuery, attachment: options.attachment }), signal,
   });
   if (!response.ok || !response.body || !response.headers.get('content-type')?.includes('text/event-stream')) {
     const data = await response.json().catch(() => null);
     throw new ChatError(typeof data?.error === 'string' ? data.error : 'The chat server could not respond. Try again.');
   }
   const source = response.headers.get(REPLY_SOURCE_HEADER);
-  if (source === 'server' || source === 'preview' || source === 'clock') options.onSource(source);
-  await readChatEvents(response.body, options.onText, source === 'server' || source === 'clock', options.onSources);
+  const skill = response.headers.get(REPLY_SKILL_HEADER);
+  if (source === 'server' || source === 'preview' || source === 'clock' || source === 'skill') options.onSource(source, isSkillResultId(skill) ? skill : undefined);
+  await readChatEvents(response.body, options.onText, source !== 'preview', options.onSources);
 }

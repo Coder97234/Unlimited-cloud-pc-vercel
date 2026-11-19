@@ -1,6 +1,9 @@
-import { DEFAULT_MODEL, MAX_CONTEXT, MAX_MESSAGES, REPLY_SOURCE_HEADER } from '../shared/models.ts';
-import type { Availability, ChatMessage, ReplySource } from '../shared/models.ts';
-import { explicitSearchQuery, MAX_SEARCH_QUERY } from '../shared/search.ts';
+import { ASSISTANT_PROFILE, DEFAULT_MODEL, MAX_ATTACHMENT, MAX_CONTEXT, MAX_MESSAGES, REPLY_SKILL_HEADER, REPLY_SOURCE_HEADER, withAttachment } from '../shared/models.ts';
+import type { Availability, ChatMessage, ReplySource, TextAttachment } from '../shared/models.ts';
+import { allowsSearchToggle, explicitSearchQuery, MAX_SEARCH_QUERY } from '../shared/search.ts';
+import { SKILL_IDS, skillAvailable } from '../shared/skill-catalog.ts';
+import type { SkillResultId } from '../shared/skill-catalog.ts';
+import { runInstantSkill, workflowPrompt } from '../shared/skills.ts';
 import { clockReply, contextualClock, validTimeZone } from './clock.ts';
 import { inferenceStream } from './inference-stream.ts';
 import type { ServerGenerate } from './inference-stream.ts';
@@ -14,8 +17,13 @@ const SSE_HEADERS = {
   'X-Content-Type-Options': 'nosniff',
 };
 
-function reply(body: ReadableStream<Uint8Array>, source: ReplySource) {
-  return new Response(body, { headers: { ...SSE_HEADERS, [REPLY_SOURCE_HEADER]: source } });
+function reply(body: BodyInit, source: ReplySource, skill?: SkillResultId) {
+  return new Response(body, { headers: { ...SSE_HEADERS, [REPLY_SOURCE_HEADER]: source, ...(skill && { [REPLY_SKILL_HEADER]: skill }) } });
+}
+
+// A complete SSE reply needs no generation timer, heartbeat, or native import.
+function instantReply(content: string, source: 'skill' | 'clock', skill: SkillResultId) {
+  return reply(`data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\ndata: [DONE]\n\n`, source, skill);
 }
 
 class InvalidInput extends Error {
@@ -52,9 +60,19 @@ async function readBody(request: Request): Promise<unknown> {
   } finally { reader.releaseLock(); }
 }
 
+function parseAttachment(value: unknown): TextAttachment | undefined {
+  if (value === undefined) return;
+  if (value === null || typeof value !== 'object') throw new InvalidInput('Send a valid text attachment.');
+  const { name, text } = value as Record<string, unknown>;
+  if (typeof name !== 'string' || !name.trim() || name.length > 120 || /[\x00-\x1f\x7f]/.test(name)
+    || typeof text !== 'string' || !text.trim() || text.includes('\0')) throw new InvalidInput('Send a valid text attachment.');
+  if (text.length > MAX_ATTACHMENT) throw new InvalidInput(`Attachments can be at most ${MAX_ATTACHMENT} characters.`, 413);
+  return { name, text };
+}
+
 export function parseChat(input: unknown) {
   if (typeof input !== 'object' || input === null) throw new InvalidInput('A message is required.');
-  const { model, messages, timeZone = 'UTC', searchQuery } = input as Record<string, unknown>;
+  const { model, messages, timeZone = 'UTC', searchQuery, attachment: rawAttachment } = input as Record<string, unknown>;
   if (model !== DEFAULT_MODEL) throw new InvalidInput('Qwen 2.5 is the only supported model. Refresh Xyvora and try again.');
   if (!validTimeZone(timeZone)) throw new InvalidInput('Send a valid IANA time zone, or omit it to use UTC.');
   if (!Array.isArray(messages) || messages.length === 0 || messages.length > MAX_MESSAGES || messages.length % 2 === 0) {
@@ -71,7 +89,9 @@ export function parseChat(input: unknown) {
     if (total > MAX_CONTEXT) throw new InvalidInput('This conversation is too long. Shorten your prompt or attachment and try again.', 413);
     return { role, content };
   });
-  const rawQuery = searchQuery === undefined ? explicitSearchQuery(cleaned.at(-1)!.content) : searchQuery;
+  const prompt = cleaned.at(-1)!.content;
+  const attachment = parseAttachment(rawAttachment);
+  const rawQuery = explicitSearchQuery(prompt) ?? (searchQuery !== undefined && allowsSearchToggle(prompt) ? searchQuery : undefined);
   let query: string | undefined;
   if (rawQuery !== undefined) {
     if (typeof rawQuery !== 'string' || rawQuery.length > MAX_SEARCH_QUERY || !rawQuery.trim()) {
@@ -79,7 +99,7 @@ export function parseChat(input: unknown) {
     }
     query = rawQuery.replace(/\s+/g, ' ').trim();
   }
-  return { messages: cleaned, timeZone, query };
+  return { messages: cleaned, timeZone, query, ...(attachment && { attachment }) };
 }
 
 // Best-effort limit per function instance; this is not a shared public quota.
@@ -113,7 +133,11 @@ interface ChatOptions {
 
 export async function handleChat(request: Request, options: ChatOptions = {}): Promise<Response> {
   const availability: Availability = options.generate ? 'server' : options.preview ? 'preview' : 'unavailable';
-  if (request.method === 'GET') return json({ availability, models: availability === 'unavailable' ? [] : [DEFAULT_MODEL], webSearch: !!(options.search && options.generate) });
+  if (request.method === 'GET') {
+    const webSearch = !!(options.search && options.generate);
+    return json({ assistant: ASSISTANT_PROFILE, availability, models: availability === 'unavailable' ? [] : [DEFAULT_MODEL], webSearch,
+      skills: SKILL_IDS.filter((id) => skillAvailable(id, !!options.generate, webSearch)) });
+  }
   if (request.method !== 'POST') return json({ error: 'Method not allowed.' }, 405, { Allow: 'GET, POST' });
   if (request.headers.get('sec-fetch-site') === 'cross-site') return json({ error: 'Use the Xyvora workspace to chat.' }, 403);
   if (!/^application\/json(?:\s*;|$)/i.test(request.headers.get('content-type') ?? '')) return json({ error: 'Use application/json.' }, 415);
@@ -124,18 +148,31 @@ export async function handleChat(request: Request, options: ChatOptions = {}): P
     if (error instanceof InvalidInput) return json({ error: error.message }, error.status);
     return json({ error: 'Could not read this message.' }, 400);
   }
+  if (request.signal.aborted) return new Response(null, { status: 499 });
   const prompt = input.messages.at(-1)!.content;
-  const now = options.now?.() ?? new Date();
-  const clock = clockReply(prompt, input.timeZone, now);
   const ip = request.headers.get('x-vercel-forwarded-for')?.split(',')[0]?.trim().slice(0, 64) || 'unknown';
-  if (options.limit && !mayRequest(ip, !clock && !!input.query)) return json({ error: 'Too many requests. Wait a minute and try again.' }, 429, { 'Retry-After': '60' });
+  if (options.limit && !mayRequest(ip, !!input.query)) return json({ error: 'Too many requests. Wait a minute and try again.' }, 429, { 'Retry-After': '60' });
 
-  if (clock) return reply(inferenceStream(async (_signal, output) => { output.text(clock); }, request.signal), 'clock');
+  const now = options.now?.() ?? new Date();
+  if (!input.query) {
+    const skill = runInstantSkill(prompt, input.attachment?.text);
+    if (skill) return instantReply(skill.text, 'skill', skill.id);
+    const clock = clockReply(prompt, input.timeZone, now);
+    if (clock) return instantReply(clock, 'clock', 'time');
+  }
+
+  const modelPrompt = withAttachment(input.query ? prompt : workflowPrompt(prompt), input.attachment);
+  const messages = input.messages;
+  if (modelPrompt !== prompt) {
+    const historyLength = messages.slice(0, -1).reduce((sum, message) => sum + message.content.length, 0);
+    if (historyLength + modelPrompt.length > MAX_CONTEXT) return json({ error: 'This conversation is too long. Shorten your prompt or attachment and try again.' }, 413);
+    messages[messages.length - 1] = { role: 'user', content: modelPrompt };
+  }
 
   const { generate, search } = options;
   if (input.query && (!search || !generate)) return json({ error: 'Live web search is not available in this environment.', code: 'SEARCH_UNAVAILABLE' }, 503);
   if (!generate) {
-    if (options.preview) return reply(previewResponse(prompt, request.signal), 'preview');
+    if (options.preview) return reply(previewResponse(modelPrompt, request.signal), 'preview');
     return json({ error: 'Qwen 2.5 is unavailable. Please try again.', code: 'MODEL_UNAVAILABLE' }, 503);
   }
 
@@ -148,6 +185,6 @@ export async function handleChat(request: Request, options: ChatOptions = {}): P
         return;
       }
     }
-    await generate(input.messages, signal, output.text, { sources, clock: contextualClock(prompt, input.timeZone, now) });
+    await generate(messages, signal, output.text, { sources, clock: contextualClock(prompt, input.timeZone, now) });
   }, request.signal), 'server');
 }

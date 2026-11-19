@@ -40,12 +40,12 @@ async function loadEngine(signal: AbortSignal): Promise<Engine> {
     const path = packagedWeightPath();
     const packaged = await hasExpectedSize(path, MODEL_WEIGHT);
     if (!packaged && process.env.VERCEL === '1') throw new Error('The function bundle is missing the verified Qwen model');
-    const native = await import('node-llama-cpp');
-    const threads = await cpuThreads();
+    const [native, threads] = await Promise.all([import('node-llama-cpp'), cpuThreads()]);
     backend ??= await native.getLlama({ gpu: false, build: 'never', skipDownload: true, maxThreads: threads, logLevel: native.LlamaLogLevel.error });
     signal.throwIfAborted();
+    // mmap with on-demand tensor loading avoids an eager prefetch on cold starts.
     const model = packaged
-      ? await backend.loadModel({ modelPath: path, gpuLayers: 0, useMmap: true, loadSignal: signal })
+      ? await backend.loadModel({ modelPath: path, gpuLayers: 0, useMmap: true, lazyMode: true, loadSignal: signal })
       : await loadDevelopmentModel(backend, signal);
     const wrapper = new native.ChatMLChatWrapper();
     const sharedPrefix = wrapper.generateContextState({ chatHistory: [{ type: 'system', text: SYSTEM_PROMPT }] }).contextText.tokenize(model.tokenizer);

@@ -1,3 +1,5 @@
+import { directInfoSkill, readSkillCommand } from './skill-catalog.ts';
+
 export const MAX_SEARCH_QUERY = 350;
 export const MAX_WEB_SOURCES = 4;
 export type WebSource = { title: string; url: string; excerpt?: string; provider?: 'wikipedia' | 'wiby' };
@@ -5,6 +7,14 @@ export type WebSource = { title: string; url: string; excerpt?: string; provider
 export function explicitSearchQuery(prompt: string): string | undefined {
   const line = prompt.trim().split(/\r?\n/, 1)[0];
   return /^(?:\/search(?:\s+|$)|(?:please\s+)?search (?:the web|online) for\s+)(.*)$/i.exec(line)?.[1].trim();
+}
+
+export function allowsSearchToggle(prompt: string) {
+  return !readSkillCommand(prompt) && !directInfoSkill(prompt);
+}
+
+export function chatSearchQuery(prompt: string, searchEnabled: boolean) {
+  return explicitSearchQuery(prompt) ?? (searchEnabled && allowsSearchToggle(prompt) ? prompt.trim() : undefined);
 }
 
 function cleanText(value: unknown, limit: number) {

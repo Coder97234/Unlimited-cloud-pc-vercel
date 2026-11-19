@@ -1,3 +1,5 @@
+import { readSkillCommand } from '../shared/skill-catalog.ts';
+
 const cities: Readonly<Record<string, string>> = {
   'baton rouge': 'America/Chicago', 'new orleans': 'America/Chicago', 'new york city': 'America/New_York',
   nyc: 'America/New_York', 'washington dc': 'America/New_York', 'san francisco': 'America/Los_Angeles',
@@ -27,12 +29,13 @@ const zoneQuestion = /^(?:what time ?zone am i in|what(?:'s| is) my time ?zone|m
 
 export function clockReply(prompt: string, timeZone: string, now: Date): string | undefined {
   const text = prompt.trim().replace(/’/g, "'").replace(/\s+/g, ' ').replace(/[?!.,]+$/, '').replace(/(?:,? please)$/i, '').trim();
+  const command = readSkillCommand(prompt);
   const time = timeQuestion.exec(text);
   const date = dateQuestion.exec(text);
   if (zoneQuestion.test(text)) return `Your chat is using **${timeZone}** from your device's time zone, or UTC if none was provided.`;
   if (yearQuestion.test(text)) return `It’s **${new Intl.DateTimeFormat('en-US', { timeZone, year: 'numeric' }).format(now)}** in **${timeZone}**.`;
-  if (!time && !date) return;
-  const place = (time ?? date)?.[1]?.trim();
+  if (command?.id !== 'time' && !time && !date) return;
+  const place = command?.id === 'time' ? command.argument : (time || date)?.[1]?.trim();
   const zone = place ? zoneForPlace(place.replace(/ (?:right now|now|rn)$/i, ''), timeZone) : timeZone;
   if (!zone) return 'I couldn’t match that place to a time zone. Try a city such as Tokyo or a time zone such as `America/Chicago`.';
   const day = new Intl.DateTimeFormat('en-US', { timeZone: zone, dateStyle: 'full' }).format(now);

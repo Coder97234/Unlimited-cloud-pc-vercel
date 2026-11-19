@@ -1,5 +1,6 @@
 import { Columns2, HardDrive, MessageSquare, Moon, Search, Sun, Trash2 } from 'lucide-react';
 import { useState } from 'react';
+import { MODEL_NAME, XYVORA_NAME, XYVORA_SITE, XYVORA_URL } from '../../shared/models.ts';
 import type { Thread } from '../lib/history.ts';
 import { Dialog } from './Dialog.tsx';
 
@@ -46,12 +47,13 @@ export function SettingsDialog({ theme, count, onTheme, onClear, onClose }: {
 }
 
 export function AboutDialog({ onClose }: { onClose: () => void }) {
-  return <Dialog title="About Xyvora" subtitle="Qwen 2.5 chat with live tools." onClose={onClose}>
+  return <Dialog title={`About ${XYVORA_NAME}`} subtitle={`The AI assistant at ${XYVORA_SITE}.`} onClose={onClose}>
     <div className="about-content">
-      <p><strong>Chat:</strong> Qwen 2.5 is the only AI model. Earlier chats and comparisons stay in your history.</p>
+      <p><strong>{XYVORA_NAME}</strong> is the assistant at <a href={XYVORA_URL} target="_blank" rel="noopener noreferrer">{XYVORA_SITE}</a>. <strong>{MODEL_NAME}</strong> is the model that powers its AI replies. Earlier chats and comparisons remain in your history.</p>
+      <p><strong>Skills:</strong> Math, conversions, calendar calculations, and text tools run on this device. Open Skills for examples or type <code>/skills</code>.</p>
       <p><strong>Web search:</strong> Turn on Web search for a prompt or type <code>/search</code> followed by a query. Results link to their original pages. Search covers the Wiby independent-web index and English Wikipedia; it does not cover every site or guarantee breaking news.</p>
-      <p><strong>Time and date:</strong> Ask for the time, today’s date, or the time in a city such as Tokyo. The live clock uses your device’s time zone unless you ask for another.</p>
-      <p><strong>Privacy:</strong> History stays in this browser. Xyvora sends the prompt, recent context, and attached text to its server for replies. When you use Web search, the query alone is sent to <a href="https://wiby.me/json/" target="_blank" rel="noopener noreferrer">Wiby</a> and <a href="https://foundation.wikimedia.org/wiki/Policy:Privacy_policy" target="_blank" rel="noopener noreferrer">Wikipedia</a> to look up results. Do not include private information in a search.</p>
+      <p><strong>Time and date:</strong> Ask for the time, today’s date, or the time in a city such as Tokyo. Type <code>/time Tokyo</code> for example. The live clock uses your device’s time zone unless you ask for another.</p>
+      <p><strong>Privacy:</strong> History is kept in this browser. On-device skill turns stay there and aren’t included in later chat requests. Other replies can send the prompt, recent chat context, attachments, and time zone to the server. When you use Web search, the query alone is sent to <a href="https://wiby.me/json/" target="_blank" rel="noopener noreferrer">Wiby</a> and <a href="https://foundation.wikimedia.org/wiki/Policy:Privacy_policy" target="_blank" rel="noopener noreferrer">Wikipedia</a> to look up results. Do not include private information in a search.</p>
     </div>
   </Dialog>;
 }

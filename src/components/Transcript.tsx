@@ -1,30 +1,41 @@
-import { AlertCircle, ArrowUpRight, Check, Clipboard, Clock3, Globe, Paperclip, RotateCcw } from 'lucide-react';
-import { useState } from 'react';
-import Markdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import { AlertCircle, ArrowUpRight, Check, Clipboard, Clock3, Globe, Paperclip, RotateCcw, Zap } from 'lucide-react';
+import { lazy, memo, Suspense, useState } from 'react';
+import { XYVORA_NAME } from '../../shared/models.ts';
+import { skillName } from '../../shared/skill-catalog.ts';
 import { SAVED_MODEL_NAMES } from '../lib/history.ts';
 import type { Answer, Thread } from '../lib/history.ts';
-import { ModelIcon } from './Brand.tsx';
+import { Mark, ModelIcon } from './Brand.tsx';
 
-function AnswerText({ content, trustedLinksOnly }: { content: string; trustedLinksOnly: boolean }) {
-  return <div className="markdown"><Markdown remarkPlugins={[remarkGfm]} skipHtml unwrapDisallowed disallowedElements={trustedLinksOnly ? ['img', 'a'] : ['img']}
-    components={{ a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noopener noreferrer" /> }}>
-    {content}
-  </Markdown></div>;
+function PlainAnswer({ content }: { content: string }) {
+  return <div className="markdown plain-answer">{content}</div>;
 }
 
-function AnswerCard({ answer, searching, onRetry, onAlert }: {
-  answer: Answer; searching: boolean; onRetry?: () => void;
+// Markdown parsing isn't needed to open the workspace or show the first text.
+// Plain text remains available if the chunk can't be loaded (e.g. offline).
+const MarkdownAnswer = lazy(() => import('./MarkdownAnswer.tsx').catch(() => ({ default: PlainAnswer })));
+const AnswerText = memo(function AnswerText({ content, trustedLinksOnly }: { content: string; trustedLinksOnly: boolean }) {
+  return <Suspense fallback={<PlainAnswer content={content} />}>
+    <MarkdownAnswer content={content} trustedLinksOnly={trustedLinksOnly} />
+  </Suspense>;
+});
+
+function AnswerCard({ answer, archived, searching, onRetry, onAlert }: {
+  answer: Answer; archived: boolean; searching: boolean; onRetry?: () => void;
   onAlert: (message: string) => void;
 }) {
   const [copied, setCopied] = useState(false);
   const clock = answer.source === 'clock';
-  const name = clock ? 'Live clock' : SAVED_MODEL_NAMES[answer.model];
+  const instant = answer.source === 'skill';
+  const historical = archived || answer.source === 'legacy';
+  const name = historical ? SAVED_MODEL_NAMES[answer.model] : XYVORA_NAME;
+  const badge = clock ? 'Live clock' : instant ? (answer.skill ? skillName(answer.skill) : 'Built-in skill') : historical ? undefined : SAVED_MODEL_NAMES[answer.model];
   const sources = answer.sources ?? [];
   const working = answer.state === 'working';
-  return <article className="answer-card" aria-label={`${name} response`}>
+  return <article className="answer-card" aria-label={`${clock || instant ? badge : name} response`}>
     <header className="answer-heading">
-      {clock ? <span className="model-icon tint-sky"><Clock3 size={17} /></span> : <ModelIcon id={answer.model} />}<strong>{name}</strong>
+      {clock ? <span className="model-icon tint-sky"><Clock3 size={17} /></span> : instant ? <span className="model-icon tint-violet"><Zap size={17} /></span>
+        : historical ? <ModelIcon id={answer.model} /> : <Mark className="reply-mark" />}
+      <strong>{name}</strong>{badge && <span className="answer-tag">{badge}</span>}
       {answer.source === 'preview' && <span className="answer-tag">Sample</span>}
       {answer.source === 'legacy' && <span className="answer-tag">Earlier reply</span>}
     </header>
@@ -68,7 +79,7 @@ export function Transcript({ thread, busy, onRetry, onAlert }: {
         <div className="user-message"><p>{turn.prompt}</p>{turn.searchQuery && <span className="user-attachment"><Globe size={13} />Web search</span>}{turn.attachment && <span className="user-attachment"><Paperclip size={13} />{turn.attachment.name}</span>}</div>
       </div>
       <div className="answer-grid">
-        {turn.answers.map((answer, lane) => <AnswerCard key={`${lane}-${answer.model}`} answer={answer} searching={!!turn.searchQuery}
+        {turn.answers.map((answer, lane) => <AnswerCard key={`${lane}-${answer.model}`} answer={answer} archived={thread.mode === 'compare'} searching={!!turn.searchQuery}
           onRetry={index === thread.turns.length - 1 && !busy && lane === 0 ? onRetry : undefined}
           onAlert={onAlert} />)}
       </div>

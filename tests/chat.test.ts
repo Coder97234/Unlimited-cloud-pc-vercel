@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { ASSISTANT_PROFILE } from '../shared/models.ts';
+import { SKILL_IDS } from '../shared/skill-catalog.ts';
 import { test } from 'node:test';
 import vercelChat from '../server/vercel-chat.ts';
 import { handleChat, parseChat } from '../server/chat.ts';
@@ -42,9 +44,9 @@ test('a missing backend never looks like successful inference', async () => {
   assert.equal((await reply.json()).code, 'MODEL_UNAVAILABLE');
 });
 
-test('Vercel advertises only Qwen and live web search, regardless of old Gateway headers', async () => {
+test('Vercel advertises the Xyvora identity, skills, and only Qwen 2.5, regardless of old Gateway headers', async () => {
   const reply = await vercelChat.fetch(new Request(url, { headers: { 'x-vercel-oidc-token': 'mock-runtime-token' } }));
-  assert.deepEqual(await reply.json(), { availability: 'server', models: ['qwen-lite'], webSearch: true });
+  assert.deepEqual(await reply.json(), { assistant: ASSISTANT_PROFILE, availability: 'server', models: ['qwen-lite'], webSearch: true, skills: SKILL_IDS });
   assert.equal((await vercelChat.fetch(request({ ...body, model: 'smollm' }))).status, 400);
 });
 
@@ -96,6 +98,7 @@ test('answers time, dates and named zones without inference or web search', asyn
   const now = () => new Date('2026-11-18T23:35:00Z');
   for (const [content, expected] of [
     ['What time is it?', /5:35 PM CST.*America\/Chicago/],
+    ['/time Tokyo', /8:35 AM GMT\+9.*Asia\/Tokyo/],
     ['What time is it in Tokyo right now?', /8:35 AM GMT\+9.*Thursday, November 19, 2026.*Asia\/Tokyo/],
     ['What’s today’s date?', /Wednesday, November 18, 2026/],
     ['What is my time zone?', /America\/Chicago/],

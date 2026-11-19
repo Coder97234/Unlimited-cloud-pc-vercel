@@ -2,7 +2,7 @@ import { ArrowUp, Globe, Paperclip, Plus, Square, X } from 'lucide-react';
 import { useLayoutEffect, useRef } from 'react';
 import type { ChangeEvent, RefObject } from 'react';
 import { DEFAULT_MODEL, MAX_ATTACHMENT, MAX_PROMPT, MODEL_NAME } from '../../shared/models.ts';
-import { explicitSearchQuery, MAX_SEARCH_QUERY } from '../../shared/search.ts';
+import { allowsSearchToggle, chatSearchQuery, explicitSearchQuery, MAX_SEARCH_QUERY } from '../../shared/search.ts';
 import type { Attachment } from '../lib/history.ts';
 import { ModelIcon } from './Brand.tsx';
 
@@ -22,9 +22,11 @@ type Props = {
 };
 
 export function Composer({ draft, onDraft, textarea, attachment, onAttachment, onAlert, onSend, onStop, webSearch, canSearch, onToggleSearch, busy }: Props) {
-  const query = explicitSearchQuery(draft) ?? (webSearch ? draft.trim() : undefined);
+  const searchEnabled = allowsSearchToggle(draft);
+  const explicit = explicitSearchQuery(draft) !== undefined;
+  const query = chatSearchQuery(draft, webSearch);
   const searchTooLong = query !== undefined && query.length > MAX_SEARCH_QUERY;
-  const canSend = !!draft.trim() && !searchTooLong;
+  const canSend = !!draft.trim() && !searchTooLong && (query === undefined || !!query.trim());
   const fileInput = useRef<HTMLInputElement>(null);
   useLayoutEffect(() => {
     const field = textarea.current;
@@ -45,7 +47,7 @@ export function Composer({ draft, onDraft, textarea, attachment, onAttachment, o
         onAlert('Choose a non-empty text file under 8,000 characters.');
         return;
       }
-      onAttachment({ name: file.name.slice(0, 120), text });
+      onAttachment({ name: file.name.slice(0, 120).replace(/[\x00-\x1f\x7f]/g, ' ').trim() || 'attachment.txt', text });
       textarea.current?.focus();
     } catch { onAlert('Could not read that text file.'); }
   }
@@ -57,7 +59,7 @@ export function Composer({ draft, onDraft, textarea, attachment, onAttachment, o
     </div>}
     <textarea
       ref={textarea} value={draft} maxLength={MAX_PROMPT} onChange={(event) => onDraft(event.target.value)} rows={2}
-      placeholder={webSearch ? 'What should I look up?…' : 'Ask Xyvora anything…'} aria-label="Message Xyvora"
+      placeholder={webSearch ? 'What should I look up?…' : 'Ask Xyvora AI anything…'} aria-label="Message Xyvora"
       aria-describedby={query !== undefined && canSearch ? 'search-disclosure' : undefined}
       onKeyDown={(event) => {
         if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
@@ -71,8 +73,8 @@ export function Composer({ draft, onDraft, textarea, attachment, onAttachment, o
         <input type="file" ref={fileInput} hidden accept=".txt,.md,.csv,.json,.js,.ts,.py" onChange={(event) => void attach(event)} />
         <button type="button" className="attach-button" title="Attach a text file" aria-label="Attach a text file" onClick={() => fileInput.current?.click()}><Plus size={19} /></button>
         <span className="model-chip"><ModelIcon id={DEFAULT_MODEL} size={14} /><span>{MODEL_NAME}</span></span>
-        <button type="button" className="web-search-chip" aria-pressed={webSearch} disabled={!canSearch || busy}
-          title={canSearch ? 'Search the web with just this prompt' : 'Available on the live site'} onClick={onToggleSearch}>
+        <button type="button" className="web-search-chip" aria-pressed={explicit || (searchEnabled && webSearch)} disabled={!canSearch || busy || !searchEnabled || explicit}
+          title={!canSearch ? 'Available on the live site' : explicit ? 'Search command active' : searchEnabled ? 'Search the web with just this prompt' : 'This prompt uses a different skill'} onClick={onToggleSearch}>
           <Globe size={16} /><span>Web search</span>
         </button>
       </div>

@@ -1,21 +1,26 @@
-import { ArrowUpRight, Clock3, Moon, PanelLeftOpen, Sparkles, Sun, X } from 'lucide-react';
+import { ArrowUpRight, Clock3, Download, Moon, PanelLeftOpen, Sparkles, Sun, X, Zap } from 'lucide-react';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { DEFAULT_MODEL } from '../shared/models.ts';
+import { DEFAULT_MODEL, MODEL_NAME, XYVORA_NAME, XYVORA_SITE } from '../shared/models.ts';
 import type { Availability } from '../shared/models.ts';
-import { explicitSearchQuery, MAX_SEARCH_QUERY } from '../shared/search.ts';
+import { allowsSearchToggle, chatSearchQuery, MAX_SEARCH_QUERY } from '../shared/search.ts';
+import { SKILLS } from '../shared/skill-catalog.ts';
+import type { SkillId } from '../shared/skill-catalog.ts';
+import { runInstantSkill } from '../shared/skills.ts';
 import { HeroMark } from './components/Brand.tsx';
 import { Composer } from './components/Composer.tsx';
 import { Dialog } from './components/Dialog.tsx';
 import { Sidebar } from './components/Sidebar.tsx';
+import { SkillsDialog } from './components/SkillsDialog.tsx';
 import { Suggestions } from './components/Suggestions.tsx';
 import { Transcript } from './components/Transcript.tsx';
 import { AboutDialog, SearchDialog, SettingsDialog } from './components/WorkspaceDialogs.tsx';
 import type { Theme } from './components/WorkspaceDialogs.tsx';
+import { downloadConversation } from './lib/export-chat.ts';
 import { buildMessages, loadThreads, MAX_THREADS, MAX_TURNS, storeThreads, titleForPrompt } from './lib/history.ts';
 import type { Answer, Attachment, Thread, Turn } from './lib/history.ts';
 import { ChatError, streamChat } from './lib/stream.ts';
 
-type Modal = { kind: 'delete'; thread: Thread } | { kind: 'search' | 'settings' | 'about' };
+type Modal = { kind: 'delete'; thread: Thread } | { kind: 'search' | 'settings' | 'about' | 'skills' };
 
 function readTheme(): Theme {
   try { return localStorage.getItem('xyvora.theme') === 'dark' ? 'dark' : 'light'; }
@@ -25,6 +30,7 @@ const emptyTurns: Turn[] = [];
 
 export default function App() {
   const [threads, setThreads] = useState(loadThreads);
+  const savedThreads = useRef(threads);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [attachment, setAttachment] = useState<Attachment>();
@@ -67,7 +73,9 @@ export default function App() {
     try { localStorage.setItem('xyvora.theme', theme); } catch { /* Browser storage may be unavailable. */ }
   }, [theme]);
   useEffect(() => {
-    if (!busy && !storeThreads(threads)) setToast('This browser could not save chat history.');
+    if (busy || savedThreads.current === threads) return;
+    if (storeThreads(threads)) savedThreads.current = threads;
+    else setToast('This browser could not save chat history.');
   }, [threads, busy]);
   useEffect(() => {
     if (!toast) return;
@@ -112,6 +120,7 @@ export default function App() {
     if (matchMedia('(max-width: 760px)').matches) setMobileOpen((open) => !open);
     else setCollapsed((closed) => !closed);
   }
+  function openSkills() { setMobileOpen(false); setModal({ kind: 'skills' }); }
   function toggleTheme() { setTheme((current) => current === 'dark' ? 'light' : 'dark'); }
 
   useEffect(() => {
@@ -120,6 +129,8 @@ export default function App() {
       if ((event.metaKey || event.ctrlKey) && key === 'k') {
         event.preventDefault();
         setModal({ kind: 'search' });
+      } else if ((event.metaKey || event.ctrlKey) && key === '/') {
+        event.preventDefault(); openSkills();
       } else if ((event.metaKey || event.ctrlKey) && event.shiftKey && key === 'o') {
         event.preventDefault(); closeModal(); setNew();
       } else if (key === 'escape') setMobileOpen(false);
@@ -131,22 +142,23 @@ export default function App() {
   async function run(retry?: Turn) {
     const prompt = retry?.prompt ?? draft.trim();
     if (controllerRef.current || archived || !prompt) return;
-    const searchQuery = retry?.searchQuery ?? explicitSearchQuery(prompt) ?? (!retry && webSearch ? prompt : undefined);
+    const attached = retry ? retry.attachment : attachment;
+    const searchQuery = chatSearchQuery(prompt, !retry && webSearch) ?? (allowsSearchToggle(prompt) ? retry?.searchQuery : undefined);
+    const skill = searchQuery === undefined ? runInstantSkill(prompt, attached?.text) : undefined;
     if (searchQuery !== undefined) {
-      if (!canSearch) { setToast('Web search is available on xyvora.net.'); return; }
+      if (!canSearch) { setToast(`Web search needs the live chat on ${XYVORA_SITE}.`); return; }
       if (!searchQuery.trim() || searchQuery.length > MAX_SEARCH_QUERY) {
         setToast(`Enter 1–${MAX_SEARCH_QUERY} characters for Web search.`);
         return;
       }
     }
-    const controller = new AbortController();
-    controllerRef.current = controller;
     const historical = retry ? turns.slice(0, -1) : turns;
     const threadId = activeId ?? crypto.randomUUID();
     const turnId = retry?.id ?? crypto.randomUUID();
     const turn: Turn = {
-      id: turnId, prompt, searchQuery, attachment: retry ? retry.attachment : attachment,
-      answers: [{ model: DEFAULT_MODEL, content: '', state: 'working' }],
+      id: turnId, prompt, searchQuery, attachment: attached,
+      answers: [skill ? { model: DEFAULT_MODEL, content: skill.text, state: 'finished', source: 'skill', skill: skill.id }
+        : { model: DEFAULT_MODEL, content: '', state: 'working' }],
     };
     const thread: Thread = {
       id: threadId, title: active?.title ?? titleForPrompt(prompt), mode: 'chat',
@@ -154,11 +166,14 @@ export default function App() {
     };
     setThreads((current) => [thread, ...current.filter(({ id }) => id !== threadId)].slice(0, MAX_THREADS));
     setActiveId(threadId);
-    setBusy(true);
     if (!retry) { setDraft(''); setAttachment(undefined); setWebSearch(false); }
     followReplies.current = true;
     focusPrompt();
+    if (skill) return;
 
+    const controller = new AbortController();
+    controllerRef.current = controller;
+    setBusy(true);
     const update = (patch: Partial<Answer>) => setThreads((current) => current.map((item) => item.id !== threadId ? item : {
       ...item,
       turns: item.turns.map((entry) => entry.id !== turnId ? entry : { ...entry, answers: [{ ...entry.answers[0], ...patch }] }),
@@ -167,13 +182,13 @@ export default function App() {
     let frame = 0;
     try {
       await streamChat(buildMessages(historical, turn), controller.signal, {
-        searchQuery,
+        searchQuery, attachment: attached,
         onText: (delta) => {
           if (controller.signal.aborted) return;
           content = (content + delta).slice(0, 36_000);
           if (!frame) frame = requestAnimationFrame(() => { frame = 0; update({ content }); });
         },
-        onSource: (source) => update({ source }),
+        onSource: (source, skill) => update({ source, skill }),
         onSources: (sources) => update({ sources }),
       });
       controller.signal.throwIfAborted();
@@ -194,17 +209,23 @@ export default function App() {
   function pickPrompt(prompt: string, search = false) {
     if (archived) setNew();
     setMobileOpen(false);
-    if (search && !canSearch) { setToast('Web search is available on xyvora.net.'); return; }
+    if (search && !canSearch) { setToast(`Web search needs the live chat on ${XYVORA_SITE}.`); return; }
     setWebSearch(search);
     if (prompt) setDraft(prompt);
     focusPrompt();
+  }
+
+  function pickSkill(id: SkillId) {
+    const skill = SKILLS[id];
+    closeModal();
+    pickPrompt(!archived && attachment && 'attachmentCommand' in skill ? skill.attachmentCommand : skill.example);
   }
 
   return <div className={`app-shell${collapsed ? ' sidebar-collapsed' : ''}${mobileOpen ? ' sidebar-open' : ''}`}>
     <a href="#main-workspace" className="skip-link">Skip to chat</a>
     <button type="button" className="mobile-overlay" onClick={() => setMobileOpen(false)} aria-label="Close sidebar"><span /></button>
     <Sidebar threads={threads} activeId={activeId} availability={availability} onNew={setNew}
-      onSearch={() => { setMobileOpen(false); setModal({ kind: 'search' }); }} onWebSearch={() => pickPrompt('', true)}
+      onSearch={() => { setMobileOpen(false); setModal({ kind: 'search' }); }} onSkills={openSkills} onWebSearch={() => pickPrompt('/search ', true)}
       onClock={() => pickPrompt('What time is it?')} onSettings={() => { setMobileOpen(false); setModal({ kind: 'settings' }); }}
       onCollapse={toggleSidebar} onThread={showThread} onDelete={(thread) => setModal({ kind: 'delete', thread })}
       onAbout={() => { setMobileOpen(false); setModal({ kind: 'about' }); }} />
@@ -212,11 +233,13 @@ export default function App() {
       <header className="topbar">
         <div className="topbar-location">
           <button type="button" className="icon-button open-sidebar" onClick={toggleSidebar} title="Open sidebar" aria-label="Open sidebar" aria-controls="workspace-sidebar"><PanelLeftOpen size={19} /></button>
-          <span className="topbar-workspace">Workspace</span><span className="breadcrumb-divider">/</span>
+          <span className="topbar-workspace">{XYVORA_NAME}</span><span className="breadcrumb-divider">/</span>
           <strong>{archived ? 'Archive' : 'Chat'}</strong>
         </div>
         <div className="topbar-actions">
-          <button type="button" onClick={() => pickPrompt('What time is it?')} className="clock-button"><Clock3 size={16} /><span>Local time</span></button>
+          <button type="button" className="skills-button" aria-keyshortcuts="Control+/ Meta+/" onClick={openSkills}><Zap size={16} /><span>Skills</span></button>
+          <button type="button" onClick={() => pickPrompt('What time is it?')} className="clock-button" aria-label="Local time" title="Local time"><Clock3 size={16} /><span>Local time</span></button>
+          {active && turns.length > 0 && <button type="button" className="icon-button export-button" aria-label="Download conversation as Markdown" title="Download conversation as Markdown" onClick={() => downloadConversation(active)}><Download size={17} /></button>}
           <span className="topbar-divider" aria-hidden="true" />
           <button type="button" className="icon-button theme-toggle" aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`} title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`} onClick={toggleTheme}>{theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}</button>
         </div>
@@ -226,26 +249,27 @@ export default function App() {
           const { scrollHeight, scrollTop, clientHeight } = event.currentTarget;
           followReplies.current = scrollHeight - scrollTop - clientHeight < 130;
         }}><Transcript thread={active} busy={busy} onRetry={archived ? undefined : () => void run(turns.at(-1))} onAlert={setToast} /></div>
-        <div className="bottom-composer"><div className="compose-width">{archived ? <div className="archive-notice"><span>Earlier comparison · read-only</span><button type="button" className="secondary-button" onClick={setNew}>New Qwen chat</button></div> : composer}</div></div>
+        <div className="bottom-composer"><div className="compose-width">{archived ? <div className="archive-notice"><span>Earlier comparison · read-only</span><button type="button" className="secondary-button" onClick={setNew}>New chat</button></div> : composer}</div></div>
       </> : <div className="welcome-scroll">
         <div className="welcome">
           <div className="welcome-heading">
             <HeroMark />
-            <span className="workspace-kicker"><Sparkles size={13} strokeWidth={2.1} /> POWERED BY QWEN 2.5</span>
-            <h1>What’s on your mind<span>?</span></h1><p>Chat with Qwen 2.5, search the web, or ask for the time.</p>
+            <span className="workspace-kicker"><Sparkles size={13} strokeWidth={2.1} /> POWERED BY {MODEL_NAME.toUpperCase()}</span>
+            <h1>What’s on your mind<span>?</span></h1><p>Meet <strong>{XYVORA_NAME}</strong>, your assistant on <strong>{XYVORA_SITE}</strong>. Ask a question or try a skill.</p>
           </div>
           {composer}
-          <Suggestions onPick={pickPrompt} />
+          <Suggestions onPick={pickPrompt} onSkills={openSkills} />
         </div>
       </div>}
       <footer className="main-footer">
-        <span>Xyvora can make mistakes. Check important information.</span>
+        <span>{XYVORA_NAME} can make mistakes. Check important information.</span>
         <button type="button" className="footer-link" onClick={() => setModal({ kind: 'about' })}>About <ArrowUpRight size={12} /></button>
       </footer>
     </main>
     {modal?.kind === 'search' && <SearchDialog threads={threads} onClose={closeModal} onPick={showThread} />}
     {modal?.kind === 'settings' && <SettingsDialog theme={theme} count={threads.length} onTheme={setTheme} onClose={closeModal}
       onClear={() => { setNew(); setThreads([]); setToast('Chat history cleared.'); }} />}
+    {modal?.kind === 'skills' && <SkillsDialog canGenerate={availability === 'server'} canSearch={canSearch} onPick={pickSkill} onClose={closeModal} />}
     {modal?.kind === 'about' && <AboutDialog onClose={closeModal} />}
     {modal?.kind === 'delete' && <Dialog title="Delete conversation?" subtitle="This only deletes the copy saved in this browser." onClose={closeModal}>
       <p className="delete-title">{modal.thread.title}</p>

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readChatEvents } from '../src/lib/stream.ts';
-import { DEFAULT_MODEL } from '../shared/models.ts';
+import { ASSISTANT_PROFILE, DEFAULT_MODEL } from '../shared/models.ts';
+import { SKILL_IDS } from '../shared/skill-catalog.ts';
 
 const target = process.argv[2];
 if (!target) throw new Error('Pass the origin to smoke-test (for example, https://xyvora.net).');
@@ -8,9 +9,9 @@ const benchmark = process.argv.includes('--benchmark');
 const url = new URL('/api/chat', target);
 const status = await fetch(url, { signal: AbortSignal.timeout(10_000) });
 assert.ok(status.ok, `Chat status returned HTTP ${status.status}`);
-assert.deepEqual(await status.json(), { availability: 'server', models: [DEFAULT_MODEL], webSearch: true });
+assert.deepEqual(await status.json(), { assistant: ASSISTANT_PROFILE, availability: 'server', models: [DEFAULT_MODEL], webSearch: true, skills: SKILL_IDS });
 
-async function check(label, content, expected, { timeZone, searchQuery, source = 'server' } = {}) {
+async function check(label, content, expected, { timeZone, searchQuery, source = 'server', skill } = {}) {
   const startedAt = performance.now();
   const response = await fetch(url, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -20,6 +21,7 @@ async function check(label, content, expected, { timeZone, searchQuery, source =
   assert.ok(response.ok, `${label} returned HTTP ${response.status}`);
   assert.match(response.headers.get('content-type') ?? '', /text\/event-stream/);
   assert.equal(response.headers.get('x-xyvora-source'), source);
+  if (skill) assert.equal(response.headers.get('x-xyvora-skill'), skill);
   let text = '';
   let chunks = 0;
   let firstText;
@@ -34,12 +36,12 @@ async function check(label, content, expected, { timeZone, searchQuery, source =
     chunks++;
     text += delta;
   }, true, (value) => { firstSource ??= performance.now() - startedAt; sources = value; });
-  assert.ok(chunks >= (source === 'clock' ? 1 : 2) && firstText !== undefined, `${label} did not stream text`);
+  assert.ok(chunks >= (source === 'server' ? 2 : 1) && firstText !== undefined, `${label} did not stream text`);
   assert.match(text, expected, `${label} did not answer the smoke prompt`);
   if (searchQuery) assert.ok(sources.some(({ url, title }) => /^https:\/\//.test(url) && /artemis/i.test(title)), 'No relevant Artemis source returned from the web');
   else assert.equal(sources.length, 0);
   const ms = Math.round;
-  console.log(`XYVORA_SOLO ${label} first=${ms(firstText)}ms done=${ms(performance.now() - startedAt)}ms stream=${ms(lastText - firstText)}ms chars=${text.length} deltas=${chunks}${searchQuery ? ` sources=${sources.length} at=${ms(firstSource)}ms` : ''}`);
+  console.log(`XYVORA_LIVE ${label} first=${ms(firstText)}ms done=${ms(performance.now() - startedAt)}ms stream=${ms(lastText - firstText)}ms chars=${text.length} deltas=${chunks}${searchQuery ? ` sources=${sources.length} at=${ms(firstSource)}ms` : ''}`);
 }
 
 for (let i = 0; i < (benchmark ? 5 : 1); i++) {
@@ -48,5 +50,7 @@ for (let i = 0; i < (benchmark ? 5 : 1); i++) {
 if (benchmark) {
   await check('long', 'Give five practical tips for packing light for a weekend trip. Use a numbered list with one sentence per tip.', /pack|wear|layer|cloth/i);
 }
-await check('clock', 'What time is it?', /\d{1,2}:\d{2}.*America\/Chicago/, { timeZone: 'America/Chicago', source: 'clock' });
+await check('identity', 'Who are you?', /Xyvora AI.*xyvora\.net.*Qwen 2\.5/, { source: 'skill', skill: 'about' });
+await check('calculator', 'What is 18% of 84.50?', /15\.21/, { source: 'skill', skill: 'calc' });
+await check('clock', '/time', /\d{1,2}:\d{2}.*America\/Chicago/, { timeZone: 'America/Chicago', source: 'clock', skill: 'time' });
 await check('search', 'What is NASA’s Artemis program?', /artemis|nasa|moon/i, { searchQuery: 'NASA Artemis program' });
