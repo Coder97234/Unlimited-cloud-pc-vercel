@@ -34,4 +34,18 @@ npm run build
 node --experimental-strip-types scripts/smoke-chat.mjs https://xyvora.net --benchmark
 ```
 
-The public smoke test verifies real Qwen streams, live clock output, and external sources. `--benchmark` repeats short prompts and times a longer reply, separating first visible text from completion.
+The public smoke test verifies real Qwen streams, live clock output, and external sources. `--benchmark` repeats short prompts and times a longer reply, separating first visible text from completion. After building and staging the weights locally, `VERCEL=1 node --experimental-strip-types scripts/check-bundle.mjs` exercises the bundled handler without HTTP or model downloads; add `--search` to check both external indexes.
+
+### Live latency sample
+
+Five consecutive short Qwen replies on `xyvora.net` produced the same seven text chunks before and after the Qwen-only release. Times include the HTTP request, not just model execution.
+
+| Measurement | Previous `9321539` | Qwen-only `e3fd665` |
+| --- | ---: | ---: |
+| Median time to first text | 1,130 ms | 336 ms |
+| Median time to complete | 1,522 ms | 812 ms |
+| First request, time to first text | 5,154 ms | 5,001 ms |
+
+These are small live samples from the Vercel region, not a latency guarantee. The improvement is mainly on already loaded instances; a cold server can still take several seconds. The longer packing-list sample started in 500 ms instead of 886 ms, but it generated 275 instead of 173 text chunks and took 17.3 instead of 10.7 seconds to finish. Generation throughput did not materially improve in that sample.
+
+The live checks ran in Vercel build job `dpl_GxM6ePhy3wguYUd2QhWenCF3yEWg` against production deployment `dpl_9GWZenYFwz9mZXFA4tcMxLkDF4Ck` via the apex domain.
