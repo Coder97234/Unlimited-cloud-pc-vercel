@@ -75,3 +75,16 @@ The live checks ran in Vercel build job `dpl_GxM6ePhy3wguYUd2QhWenCF3yEWg` again
 - The initial page script is **90.88 kB gzip** instead of **131.14 kB** (31% smaller). Markdown rendering loads when an answer is displayed, not on the empty homepage. Plain text is available while the renderer loads or if it cannot load.
 - Five calculator submissions in each of two local Chromium viewport tests took **4.3–4.7 ms median** from click to reply text in the DOM, with zero chat POSTs. These timings measure the tool and rendering on one test machine, not the speed of an end user's device.
 - We kept the existing mmap configuration after a six-run Vercel builder comparison (`dpl_9v6mA6tg2AmA135VRpwcUxJgWYFF`): median fresh-process first text was **2,415 ms** with default mmap and **2,472 ms** with lazy mmap, with similar peak memory. No reason to switch to lazy mmap or bypass the native checks.
+
+Live comparison on `xyvora.net`, five identical short prompts (31 characters and seven deltas per reply):
+
+| HTTP measurement | Previous `e3fd665` | Skills release `491cb06` |
+| --- | ---: | ---: |
+| First request, time to first text | 3,888 ms | 6,132 ms |
+| Median time to first text | 288 ms | 489 ms |
+| Median time to complete | 759 ms | 988 ms |
+| Median time from first to last text | 339 ms | 352 ms |
+
+These small regional samples include mixed startup states. They show a faster tool path and a smaller initial app payload, **not** faster general Qwen inference. The packing-list prompt completed in 7.94 s instead of 12.95 s, but it generated 159 instead of 217 deltas. Cold starts remain the main latency cost. The live API calculator completed in 65 ms; in the 390 px Chromium test the on-device calculator took 5.3 ms median to show text and made no chat POSTs.
+
+The pre-change regional benchmark used `dpl_PhDeuhTeV2MrADmj6jeFubVzVqaQ`. The live checks used `dpl_GSiiMHSZbf6FL1WX4DAwvD1dR7MU` against `dpl_8DCGNM1TF1eyAvCqwQXnL1VVWN1c` on the apex domain. Mobile checks covered the Skills picker, Xyvora identity link, private tool-history exclusion, clock, and a real Qwen translation. The HTTP smoke test also verified source retrieval and rejected the retired model ID.
