@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import vercelChat from '../api/chat.ts';
 import { handleChat, parseChat } from '../server/chat.ts';
 import { buildMessages } from '../src/lib/history.ts';
 import type { Turn } from '../src/lib/history.ts';
@@ -27,6 +28,23 @@ test('production with no configured token never generates preview responses', as
   const reply = await handleChat(request());
   assert.equal(reply.status, 503);
   assert.equal((await reply.json()).code, 'HOSTED_UNAVAILABLE');
+});
+
+test('Vercel handler uses the request-scoped OIDC token without exposing it', async (t) => {
+  const { VERCEL, AI_GATEWAY_API_KEY, VERCEL_OIDC_TOKEN, XYVORA_DISABLE_HOSTED } = process.env;
+  t.after(() => {
+    for (const [key, value] of Object.entries({ VERCEL, AI_GATEWAY_API_KEY, VERCEL_OIDC_TOKEN, XYVORA_DISABLE_HOSTED })) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+  });
+  process.env.VERCEL = '1';
+  delete process.env.AI_GATEWAY_API_KEY;
+  delete process.env.VERCEL_OIDC_TOKEN;
+  delete process.env.XYVORA_DISABLE_HOSTED;
+  const response = await vercelChat.fetch(new Request(url, { headers: { 'x-vercel-oidc-token': 'mock-runtime-token' } }));
+  const data = await response.json();
+  assert.equal(data.availability, 'hosted');
+  assert.ok(!JSON.stringify(data).includes('mock-runtime-token'));
 });
 
 test('development preview streams labeled sample responses', async () => {
