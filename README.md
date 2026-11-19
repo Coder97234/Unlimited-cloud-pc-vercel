@@ -33,3 +33,5 @@ npm run build
 # Verify real replies from both deployed models (not an availability check):
 node --disable-warning=ExperimentalWarning --experimental-strip-types scripts/smoke-chat.mjs https://xyvora.net
 ```
+
+Append `--benchmark` to repeat the two-model check and time a longer Qwen reply. The script reports time to the first visible text separately from streaming and total completion time.
