@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import vercelChat from '../server/vercel-chat.ts';
 import { handleChat, parseChat } from '../server/chat.ts';
 import { InferenceError } from '../server/inference-stream.ts';
-import { SEARCH_ENDPOINT, searchWeb } from '../server/web-search.ts';
+import { WIBY_SEARCH_URL, WIKI_SEARCH_URL, searchWeb } from '../server/web-search.ts';
 import { buildMessages, loadThreads } from '../src/lib/history.ts';
 import type { Turn } from '../src/lib/history.ts';
 import { readChatEvents } from '../src/lib/stream.ts';
@@ -99,6 +99,9 @@ test('answers time, dates and named zones without inference or web search', asyn
     ['What time is it in Tokyo right now?', /8:35 AM GMT\+9.*Thursday, November 19, 2026.*Asia\/Tokyo/],
     ['What’s today’s date?', /Wednesday, November 18, 2026/],
     ['What is my time zone?', /America\/Chicago/],
+    ['whats the time rn?', /5:35 PM CST/],
+    ['Tell me today’s date, please.', /Wednesday, November 18, 2026/],
+    ['What year is it?', /2026.*America\/Chicago/],
     ['What time is it in Atlantis?', /couldn’t match.*time zone/],
   ] as const) {
     const response = await handleChat(request({ ...body, timeZone: 'America/Chicago', messages: [{ role: 'user', content }] }), {
@@ -125,7 +128,7 @@ test('search uses just the explicit latest query; it emits numbered sources befo
   });
   let text = '';
   await readChatEvents(response.body!, (delta) => { assert.ok(received); text += delta; }, true, (sources) => {
-    assert.deepEqual(sources, [source]); received = true; release();
+    assert.deepEqual(sources, [{ title: source.title, url: source.url }]); received = true; release();
   });
   assert.match(text, /Moon \[1\]/);
 });
@@ -139,19 +142,41 @@ test('empty or failed web search never passes unsupported facts to the model', a
   await assert.rejects(collect(failed), /Web search is unavailable/);
 });
 
-test('public search sends only the bounded query and normalizes provider data', async () => {
-  const result = await searchWeb('NASA', new AbortController().signal, async (url, init) => {
-    assert.equal(url, SEARCH_ENDPOINT);
+test('live search providers receive only query keywords and return validated source records', async () => {
+  const called: string[] = [];
+  const result = await searchWeb('What is NASA’s Artemis program?', new AbortController().signal, async (input, init) => {
+    assert.ok(input instanceof URL);
     assert.equal(init?.redirect, 'error');
-    assert.equal(new Headers(init?.headers).get('X-Keenable-Title'), 'Xyvora');
-    assert.deepEqual(JSON.parse(String(init?.body)), { query: 'NASA', max_results: 4, snippet_max_length: 300 });
-    return Response.json({ results: [
-      { title: '<mark>Artemis</mark>', url: source.url, snippet: source.excerpt },
-      { title: 'duplicate', url: `${source.url}#duplicate` },
-      { title: 'invalid', url: 'data:text/html,abc' },
-    ] });
+    assert.equal(input.searchParams.get('q'), 'nasa artemis program');
+    assert.ok(new Headers(init?.headers).get('User-Agent')?.startsWith('Xyvora/'));
+    const base = input.origin + input.pathname;
+    called.push(base);
+    if (base === WIKI_SEARCH_URL) {
+      assert.equal(input.searchParams.get('limit'), '3');
+      return Response.json({ pages: [{ title: '<mark>Artemis</mark>', key: 'Artemis_program', excerpt: source.excerpt }] });
+    }
+    assert.equal(base, WIBY_SEARCH_URL);
+    return Response.json([
+      { Title: 'Unrelated', URL: 'https://example.org/unrelated', Snippet: 'Something else' },
+      { Title: source.title, URL: source.url, Snippet: 'NASA’s Artemis program will explore the Moon' },
+      { Title: 'duplicate', URL: `${source.url}#duplicate`, Snippet: 'NASA Artemis' },
+      { Title: 'invalid', URL: 'data:text/html,abc', Snippet: 'NASA Artemis' },
+    ]);
   });
-  assert.deepEqual(result, [source]);
+  assert.deepEqual(called.sort(), [WIBY_SEARCH_URL, WIKI_SEARCH_URL].sort());
+  assert.deepEqual(result, [
+    { title: 'Artemis', url: 'https://en.wikipedia.org/wiki/Artemis_program', excerpt: source.excerpt, provider: 'wikipedia' },
+    { ...source, excerpt: 'NASA’s Artemis program will explore the Moon', provider: 'wiby' },
+  ]);
+});
+
+test('handles partial provider failure, and rejects an oversized streamed provider result', async () => {
+  const signal = new AbortController().signal;
+  const partial = await searchWeb('NASA Artemis', signal, async (url) => String(url).startsWith(WIBY_SEARCH_URL)
+    ? new Response('Bad JSON')
+    : Response.json({ pages: [{ title: 'Artemis', key: 'Artemis_program', excerpt: source.excerpt }] }));
+  assert.equal(partial[0]?.provider, 'wikipedia');
+  await assert.rejects(searchWeb('NASA', signal, async () => new Response(' '.repeat(65_000) + '[]')), /search is unavailable/);
 });
 
 test('inference errors and empty streams do not claim successful completion', async () => {

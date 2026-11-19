@@ -85,19 +85,19 @@ export function parseChat(input: unknown) {
 // Best-effort limit per function instance; this is not a shared public quota.
 const windowMs = 60_000;
 const ipWindows = new Map<string, { until: number; used: number; searches: number }>();
-let globalWindow = { until: 0, used: 0 };
+let globalWindow = { until: 0, used: 0, searches: 0 };
 function mayRequest(ip: string, search: boolean) {
   const now = Date.now();
   if (globalWindow.until <= now) {
-    globalWindow = { until: now + windowMs, used: 0 };
+    globalWindow = { until: now + windowMs, used: 0, searches: 0 };
     for (const [key, record] of ipWindows) if (record.until <= now) ipWindows.delete(key);
   }
-  if (globalWindow.used >= 90) return false;
+  if (globalWindow.used >= 90 || (search && globalWindow.searches >= 30)) return false;
   const record = ipWindows.get(ip) ?? { until: now + windowMs, used: 0, searches: 0 };
   if (record.until <= now) { record.until = now + windowMs; record.used = 0; record.searches = 0; }
   if (record.used >= 14 || (search && record.searches >= 6)) return false;
   record.used += 1;
-  if (search) record.searches += 1;
+  if (search) { record.searches += 1; globalWindow.searches += 1; }
   ipWindows.set(ip, record);
   globalWindow.used += 1;
   return true;
@@ -142,7 +142,7 @@ export async function handleChat(request: Request, options: ChatOptions = {}): P
   return reply(inferenceStream(async (signal, output) => {
     const sources = input.query && search ? await search(input.query, signal) : undefined;
     if (sources) {
-      output.sources(sources);
+      output.sources(sources.map(({ title, url, provider }) => ({ title, url, provider })));
       if (sources.length === 0) {
         output.text('I couldn’t find relevant web results. Try a more specific search, or turn off Web search to ask Qwen directly.');
         return;

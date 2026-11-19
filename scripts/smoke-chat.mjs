@@ -36,7 +36,7 @@ async function check(label, content, expected, { timeZone, searchQuery, source =
   }, true, (value) => { firstSource ??= performance.now() - startedAt; sources = value; });
   assert.ok(chunks >= (source === 'clock' ? 1 : 2) && firstText !== undefined, `${label} did not stream text`);
   assert.match(text, expected, `${label} did not answer the smoke prompt`);
-  if (searchQuery) assert.ok(sources.some(({ url }) => /(^|\.)nasa\.gov$/.test(new URL(url).hostname)), 'No NASA source returned from the web');
+  if (searchQuery) assert.ok(sources.some(({ url, title }) => /^https:\/\//.test(url) && /artemis/i.test(title)), 'No relevant Artemis source returned from the web');
   else assert.equal(sources.length, 0);
   const ms = Math.round;
   console.log(`XYVORA_SOLO ${label} first=${ms(firstText)}ms done=${ms(performance.now() - startedAt)}ms stream=${ms(lastText - firstText)}ms chars=${text.length} deltas=${chunks}${searchQuery ? ` sources=${sources.length} at=${ms(firstSource)}ms` : ''}`);
@@ -49,4 +49,4 @@ if (benchmark) {
   await check('long', 'Give five practical tips for packing light for a weekend trip. Use a numbered list with one sentence per tip.', /pack|wear|layer|cloth/i);
 }
 await check('clock', 'What time is it?', /\d{1,2}:\d{2}.*America\/Chicago/, { timeZone: 'America/Chicago', source: 'clock' });
-await check('search', 'What is NASA’s Artemis program?', /artemis|nasa|moon/i, { searchQuery: 'NASA Artemis program Moon missions' });
+await check('search', 'What is NASA’s Artemis program?', /artemis|nasa|moon/i, { searchQuery: 'NASA Artemis program' });

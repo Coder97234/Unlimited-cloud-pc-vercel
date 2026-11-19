@@ -49,9 +49,9 @@ export function AboutDialog({ onClose }: { onClose: () => void }) {
   return <Dialog title="About Xyvora" subtitle="Qwen 2.5 chat with live tools." onClose={onClose}>
     <div className="about-content">
       <p><strong>Chat:</strong> Qwen 2.5 is the only AI model. Earlier chats and comparisons stay in your history.</p>
-      <p><strong>Web search:</strong> Turn on Web search for a prompt or type <code>/search</code> followed by a query. Results link to their original pages. The public search service may rate-limit requests.</p>
+      <p><strong>Web search:</strong> Turn on Web search for a prompt or type <code>/search</code> followed by a query. Results link to their original pages. Search covers the Wiby independent-web index and English Wikipedia; it does not cover every site or guarantee breaking news.</p>
       <p><strong>Time and date:</strong> Ask for the time, today’s date, or the time in a city such as Tokyo. The live clock uses your device’s time zone unless you ask for another.</p>
-      <p><strong>Privacy:</strong> History stays in this browser. Xyvora sends the prompt, recent context, and attached text to its server for replies. When you use Web search, the search query alone is sent to <a href="https://docs.keenable.ai/api-reference" target="_blank" rel="noopener noreferrer">Keenable</a>, which logs queries. Do not include private information in a search.</p>
+      <p><strong>Privacy:</strong> History stays in this browser. Xyvora sends the prompt, recent context, and attached text to its server for replies. When you use Web search, the query alone is sent to <a href="https://wiby.me/json/" target="_blank" rel="noopener noreferrer">Wiby</a> and <a href="https://foundation.wikimedia.org/wiki/Policy:Privacy_policy" target="_blank" rel="noopener noreferrer">Wikipedia</a> to look up results. Do not include private information in a search.</p>
     </div>
   </Dialog>;
 }

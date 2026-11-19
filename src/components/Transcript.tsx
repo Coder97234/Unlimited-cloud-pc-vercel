@@ -2,7 +2,6 @@ import { AlertCircle, ArrowUpRight, Check, Clipboard, Clock3, Globe, Paperclip, 
 import { useState } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { SEARCH_PROVIDER } from '../../shared/search.ts';
 import { SAVED_MODEL_NAMES } from '../lib/history.ts';
 import type { Answer, Thread } from '../lib/history.ts';
 import { ModelIcon } from './Brand.tsx';
@@ -29,17 +28,21 @@ function AnswerCard({ answer, searching, onRetry, onAlert }: {
       {answer.source === 'preview' && <span className="answer-tag">Sample</span>}
       {answer.source === 'legacy' && <span className="answer-tag">Earlier reply</span>}
     </header>
-    {answer.content && <AnswerText content={answer.content} trustedLinksOnly={sources.length > 0} />}
+    {answer.content && <AnswerText content={answer.content} trustedLinksOnly={searching || sources.length > 0} />}
     {working && !answer.content && <div className="answer-loading" role="status">
       <span className="typing-dots" aria-hidden="true"><i /><i /><i /></span><span>{searching && !clock ? (sources.length ? 'Writing with sources' : 'Searching the web') : 'Preparing a reply'}</span>
     </div>}
     {sources.length > 0 && <section className="web-sources" aria-label="Web sources">
-      <div className="web-sources-heading"><Globe size={15} /><strong>Web sources</strong><span>via {SEARCH_PROVIDER}</span></div>
+      <div className="web-sources-heading"><Globe size={15} /><strong>Web sources</strong></div>
       <ol>{sources.map((source, index) => <li key={source.url}>
         <a href={source.url} target="_blank" rel="noopener noreferrer">
           <span className="source-number">{index + 1}</span><span className="source-info"><strong>{source.title}</strong><small>{new URL(source.url).hostname}</small></span><ArrowUpRight size={14} />
         </a>
       </li>)}</ol>
+      <div className="web-source-credits">
+        {sources.some((source) => source.provider === 'wiby') && <a href="https://wiby.me/" target="_blank" rel="noopener noreferrer">Wiby search</a>}
+        {sources.some((source) => source.provider === 'wikipedia') && <a href="https://en.wikipedia.org/wiki/Wikipedia:Copyrights" target="_blank" rel="noopener noreferrer">Wikipedia (CC BY-SA)</a>}
+      </div>
     </section>}
     {answer.state === 'error' && <div className="answer-error" role="status"><AlertCircle size={17} /><span>{answer.error}</span></div>}
     {answer.state === 'stopped' && <p className="answer-stopped">Response stopped.</p>}

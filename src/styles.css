@@ -228,10 +228,11 @@ kbd { font-family: inherit; font-size: 10px; font-weight: 550; line-height: 1.2;
 .answer-stopped { color: var(--muted); font-size: 12px; padding: 5px 0; }
 .web-sources { margin-top: 13px; border: 1px solid var(--border); border-radius: 11px; padding: 9px 10px; background: var(--surface-soft); }
 .web-sources-heading { display: flex; align-items: center; gap: 6px; color: var(--accent); font-size: 12px; }
-.web-sources-heading span { margin-left: auto; color: var(--muted); font-size: 10px; }
 .web-sources ol { list-style: none; padding: 0; margin: 6px 0 0; display: grid; gap: 3px; }
-.web-sources a { display: flex; align-items: center; gap: 7px; text-decoration: none; color: var(--second); padding: 4px; border-radius: 6px; }
-.web-sources a:hover { color: var(--accent); background: var(--accent-wash); }
+.web-sources li a { display: flex; align-items: center; gap: 7px; text-decoration: none; color: var(--second); padding: 4px; border-radius: 6px; }
+.web-sources li a:hover { color: var(--accent); background: var(--accent-wash); }
+.web-source-credits { display: flex; flex-wrap: wrap; gap: 9px; padding: 4px 4px 0; }
+.web-source-credits a { color: var(--muted); font-size: 10px; text-underline-offset: 2px; }
 .source-number { display: inline-grid; place-items: center; height: 22px; width: 22px; flex: none; border-radius: 5px; background: var(--accent-wash); color: var(--accent); font-size: 11px; }
 .source-info { display: grid; gap: 2px; flex: 1; min-width: 0; }
 .source-info strong, .source-info small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

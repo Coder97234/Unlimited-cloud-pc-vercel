@@ -1,7 +1,6 @@
 export const MAX_SEARCH_QUERY = 350;
 export const MAX_WEB_SOURCES = 4;
-export const SEARCH_PROVIDER = 'Keenable';
-export type WebSource = { title: string; url: string; excerpt?: string };
+export type WebSource = { title: string; url: string; excerpt?: string; provider?: 'wikipedia' | 'wiby' };
 
 export function explicitSearchQuery(prompt: string): string | undefined {
   const line = prompt.trim().split(/\r?\n/, 1)[0];
@@ -22,7 +21,7 @@ export function normalizeSources(input: unknown): WebSource[] {
   const seen = new Set<string>();
   for (const raw of input.slice(0, 24)) {
     if (raw === null || typeof raw !== 'object') continue;
-    const { title, url, excerpt } = raw as Record<string, unknown>;
+    const { title, url, excerpt, provider } = raw as Record<string, unknown>;
     if (typeof url !== 'string' || url.length > 2_048) continue;
     try {
       const link = new URL(url);
@@ -30,7 +29,11 @@ export function normalizeSources(input: unknown): WebSource[] {
       link.hash = '';
       if (seen.has(link.href)) continue;
       seen.add(link.href);
-      results.push({ title: cleanText(title, 140) || link.hostname, url: link.href, excerpt: cleanText(excerpt, 300) || undefined });
+      const source: WebSource = { title: cleanText(title, 140) || link.hostname, url: link.href };
+      const snippet = cleanText(excerpt, 300);
+      if (snippet) source.excerpt = snippet;
+      if (provider === 'wikipedia' || provider === 'wiby') source.provider = provider;
+      results.push(source);
       if (results.length === MAX_WEB_SOURCES) break;
     } catch { /* Ignore invalid URLs. */ }
   }

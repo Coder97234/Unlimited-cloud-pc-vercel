@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readdir } from 'node:fs/promises';
 import api from '../api/chat.js';
+import { WIBY_SEARCH_URL, WIKI_SEARCH_URL, searchWeb } from '../server/web-search.ts';
 import { DEFAULT_MODEL } from '../shared/models.ts';
 import { readChatEvents } from '../src/lib/stream.ts';
 
@@ -9,7 +10,8 @@ assert.ok(!(await readdir('dist', { recursive: true })).some((file) => file.ends
 const networkFetch = globalThis.fetch;
 let lookupsAllowed = false;
 globalThis.fetch = async (url, options) => {
-  assert.ok(lookupsAllowed && url === 'https://api.keenable.ai/v1/search/public', 'Inference tried to download a model or make another unexpected request');
+  const address = new URL(url);
+  assert.ok(lookupsAllowed && [WIBY_SEARCH_URL, WIKI_SEARCH_URL].includes(address.origin + address.pathname), 'Unexpected network access');
   return networkFetch(url, options);
 };
 
@@ -25,15 +27,26 @@ async function check(label, content, expected, { timeZone = 'UTC', searchQuery, 
   await readChatEvents(response.body, (part) => { if (part.trim()) first ??= performance.now() - start; count++; text += part; }, true, (value) => { sources = value; });
   assert.ok(Number.isFinite(first) && count >= (source === 'clock' ? 1 : 2));
   assert.match(text, expected);
-  if (searchQuery) assert.ok(sources?.some(({ url }) => /(^|\.)nasa\.gov$/.test(new URL(url).hostname)));
+  if (searchQuery) assert.ok(sources?.some(({ title }) => /artemis/i.test(title)));
+  if (searchQuery) assert.ok(sources.every(({ excerpt }) => excerpt === undefined), 'Only source metadata should reach the client');
   console.log(`XYVORA_BUNDLE ${label}: first ${Math.round(first)}ms, finished ${Math.round(performance.now() - start)}ms, ${count} deltas${searchQuery ? `, ${sources.length} live sources` : ''}`);
 }
 await check('clock', 'What time is it in Tokyo?', /\d{1,2}:\d{2}.*Asia\/Tokyo/, { source: 'clock' });
 await check('fresh Qwen', 'What is the capital of France? Answer in one short sentence.', /paris/i);
 await check('reused context with a different request', 'What is the capital of Japan? Answer in one short sentence.', /tokyo/i);
 await check('reused Qwen', 'What is the capital of France? Answer in one short sentence.', /paris/i);
+// Cancel real native generation and verify the next request on the same state.
+const stop = new AbortController();
+const interrupted = await api.fetch(new Request(url, {
+  method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: stop.signal,
+  body: JSON.stringify({ model: DEFAULT_MODEL, messages: [{ role: 'user', content: 'Write a long fictional travel diary about a place called Orchid Ridge.' }] }),
+}));
+await assert.rejects(readChatEvents(interrupted.body, () => stop.abort(), true), /ended before the reply finished/);
+await check('after cancellation', 'What is the capital of Japan? Answer in one short sentence.', /tokyo/i);
 if (process.argv.includes('--search')) {
   lookupsAllowed = true;
-  await check('live search', 'What is NASA’s Artemis program?', /artemis|nasa|moon/i, { searchQuery: 'NASA Artemis program Moon missions' });
+  const independent = await searchWeb('unix shell tutorial', AbortSignal.timeout(7_000));
+  console.log(`XYVORA_BUNDLE provider check: ${[...new Set(independent.map(({ provider }) => provider))].join(', ') || 'no results'}`);
+  await check('live search', 'What is NASA’s Artemis program?', /artemis|nasa|moon/i, { searchQuery: 'NASA Artemis program' });
 }
 console.log(`XYVORA_BUNDLE peak RSS ${Math.round(process.resourceUsage().maxRSS / 1024)} MiB`);

@@ -2,6 +2,7 @@ import { ArrowUp, Globe, Paperclip, Plus, Square, X } from 'lucide-react';
 import { useLayoutEffect, useRef } from 'react';
 import type { ChangeEvent, RefObject } from 'react';
 import { DEFAULT_MODEL, MAX_ATTACHMENT, MAX_PROMPT, MODEL_NAME } from '../../shared/models.ts';
+import { explicitSearchQuery, MAX_SEARCH_QUERY } from '../../shared/search.ts';
 import type { Attachment } from '../lib/history.ts';
 import { ModelIcon } from './Brand.tsx';
 
@@ -21,6 +22,9 @@ type Props = {
 };
 
 export function Composer({ draft, onDraft, textarea, attachment, onAttachment, onAlert, onSend, onStop, webSearch, canSearch, onToggleSearch, busy }: Props) {
+  const query = explicitSearchQuery(draft) ?? (webSearch ? draft.trim() : undefined);
+  const searchTooLong = query !== undefined && query.length > MAX_SEARCH_QUERY;
+  const canSend = !!draft.trim() && !searchTooLong;
   const fileInput = useRef<HTMLInputElement>(null);
   useLayoutEffect(() => {
     const field = textarea.current;
@@ -46,7 +50,7 @@ export function Composer({ draft, onDraft, textarea, attachment, onAttachment, o
     } catch { onAlert('Could not read that text file.'); }
   }
 
-  return <form className="composer" onSubmit={(event) => { event.preventDefault(); if (!busy && draft.trim()) onSend(); }}>
+  return <form className="composer" onSubmit={(event) => { event.preventDefault(); if (!busy && canSend) onSend(); }}>
     {attachment && <div className="attachment-chip">
       <Paperclip size={14} /><span>{attachment.name}</span>
       <button type="button" className="bare-icon" onClick={() => onAttachment(undefined)} aria-label="Remove attachment"><X size={14} /></button>
@@ -54,10 +58,11 @@ export function Composer({ draft, onDraft, textarea, attachment, onAttachment, o
     <textarea
       ref={textarea} value={draft} maxLength={MAX_PROMPT} onChange={(event) => onDraft(event.target.value)} rows={2}
       placeholder={webSearch ? 'What should I look up?…' : 'Ask Xyvora anything…'} aria-label="Message Xyvora"
+      aria-describedby={query !== undefined && canSearch ? 'search-disclosure' : undefined}
       onKeyDown={(event) => {
         if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
           event.preventDefault();
-          if (!busy && draft.trim()) onSend();
+          if (!busy && canSend) onSend();
         }
       }}
     />
@@ -75,9 +80,11 @@ export function Composer({ draft, onDraft, textarea, attachment, onAttachment, o
         {draft.length > MAX_PROMPT - 400 && <span className="char-count">{draft.length}/{MAX_PROMPT}</span>}
         {busy
           ? <button type="button" className="send-button" title="Stop response" aria-label="Stop response" onClick={onStop}><Square size={14} fill="currentColor" /></button>
-          : <button type="submit" className="send-button" title="Send message" aria-label="Send message" disabled={!draft.trim()}><ArrowUp size={21} strokeWidth={2.3} /></button>}
+          : <button type="submit" className="send-button" title="Send message" aria-label="Send message" disabled={!canSend}><ArrowUp size={21} strokeWidth={2.3} /></button>}
       </div>
     </div>
-    {webSearch && <p className="search-disclosure">Only this prompt is sent to the search provider. Don’t include private information.</p>}
+    {query !== undefined && canSearch && <p id="search-disclosure" className="search-disclosure">
+      {searchTooLong ? `Keep search queries to ${MAX_SEARCH_QUERY} characters.` : `Only your search query goes to Wiby and Wikipedia, not your attachments or chat history. Don’t include private information.`}
+    </p>}
   </form>;
 }

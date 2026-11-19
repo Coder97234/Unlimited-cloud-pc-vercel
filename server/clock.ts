@@ -1,7 +1,7 @@
 const cities: Readonly<Record<string, string>> = {
   'baton rouge': 'America/Chicago', 'new orleans': 'America/Chicago', 'new york city': 'America/New_York',
   nyc: 'America/New_York', 'washington dc': 'America/New_York', 'san francisco': 'America/Los_Angeles',
-  'las vegas': 'America/Los_Angeles', 'salt lake city': 'America/Denver', houston: 'America/Chicago',
+  'las vegas': 'America/Los_Angeles', 'los angeles': 'America/Los_Angeles', 'salt lake city': 'America/Denver', houston: 'America/Chicago',
   dallas: 'America/Chicago', mumbai: 'Asia/Kolkata', delhi: 'Asia/Kolkata', 'new delhi': 'Asia/Kolkata',
   kolkata: 'Asia/Kolkata', beijing: 'Asia/Shanghai', gmt: 'UTC', utc: 'UTC',
 };
@@ -20,18 +20,20 @@ function zoneForPlace(place: string, localZone: string) {
   return Intl.supportedValuesOf('timeZone').find((zone) => zone.split('/').at(-1)?.replace(/_/g, ' ').toLowerCase() === name);
 }
 
-const timeQuestion = /^(?:what time is it|what(?:'?s| is) (?:the )?(?:current |local )?time|tell me the time|(?:current |local )?time)(?: (?:right )?now)?(?:(?: in (.+))| here)?$/i;
-const dateQuestion = /^(?:what(?:'s| is) (?:the |today's |the current )?date(?: today)?|what (?:date|day) is (?:it|today)|today's date|date today|current date)(?: in (.+))?$/i;
+const timeQuestion = /^(?:what time is it|what(?:'?s| is) (?:the )?(?:current |local )?time|tell me (?:the )?(?:current |local )?time|(?:current |local )?time)(?: (?:right now|now|rn))?(?: in (.+)| here)?$/i;
+const dateQuestion = /^(?:(?:what(?:'?s| is)|tell me) (?:the |today's |the current )?date(?: today)?|what (?:date|day) is (?:it|today)|today's date|date today|current date)(?: in (.+))?$/i;
+const yearQuestion = /^(?:what year is it|what(?:'s| is) the current year|current year)$/i;
 const zoneQuestion = /^(?:what time ?zone am i in|what(?:'s| is) my time ?zone|my time ?zone)$/i;
 
 export function clockReply(prompt: string, timeZone: string, now: Date): string | undefined {
-  const text = prompt.trim().replace(/’/g, "'").replace(/[?!.,]+$/, '').trim();
+  const text = prompt.trim().replace(/’/g, "'").replace(/\s+/g, ' ').replace(/[?!.,]+$/, '').replace(/(?:,? please)$/i, '').trim();
   const time = timeQuestion.exec(text);
   const date = dateQuestion.exec(text);
   if (zoneQuestion.test(text)) return `Your chat is using **${timeZone}** from your device's time zone, or UTC if none was provided.`;
+  if (yearQuestion.test(text)) return `It’s **${new Intl.DateTimeFormat('en-US', { timeZone, year: 'numeric' }).format(now)}** in **${timeZone}**.`;
   if (!time && !date) return;
   const place = (time ?? date)?.[1]?.trim();
-  const zone = place ? zoneForPlace(place.replace(/ (?:right )?now$/i, ''), timeZone) : timeZone;
+  const zone = place ? zoneForPlace(place.replace(/ (?:right now|now|rn)$/i, ''), timeZone) : timeZone;
   if (!zone) return 'I couldn’t match that place to a time zone. Try a city such as Tokyo or a time zone such as `America/Chicago`.';
   const day = new Intl.DateTimeFormat('en-US', { timeZone: zone, dateStyle: 'full' }).format(now);
   if (date) return `Today is **${day}** in **${zone}**.`;
@@ -40,6 +42,6 @@ export function clockReply(prompt: string, timeZone: string, now: Date): string 
 }
 
 export function contextualClock(prompt: string, timeZone: string, now: Date) {
-  if (!/\b(?:today|tomorrow|yesterday|current date|time zone|right now)\b/i.test(prompt)) return;
+  if (!/\b(?:today|tomorrow|yesterday|current date|current time|time zone|right now)\b/i.test(prompt)) return;
   return new Intl.DateTimeFormat('en-US', { timeZone, dateStyle: 'full', timeStyle: 'short' }).format(now) + ` (${timeZone})`;
 }

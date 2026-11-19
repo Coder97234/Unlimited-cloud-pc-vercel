@@ -9,11 +9,11 @@ import { DEFAULT_MODEL } from '../shared/models.ts';
 
 export type WeightSpec = { url: string; size: number; sha256: string };
 
-// Official Apache-2.0 Qwen 2.5 0.5B Instruct, pinned by revision and checksum.
+// Apache-2.0 Qwen 2.5 0.5B Instruct, compact Q4_0 GGUF by bartowski.
 export const MODEL_WEIGHT = {
-  url: 'https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/9217f5db79a29953eb74d5343926648285ec7e67/qwen2.5-0.5b-instruct-q4_0.gguf',
-  size: 428_730_208,
-  sha256: '7671c0c304e6ce5a7fc577bcb12aba01e2c155cc2efd29b2213c95b18edaf6ed',
+  url: 'https://huggingface.co/bartowski/Qwen2.5-0.5B-Instruct-GGUF/resolve/41ba88dbac95fed2528c92514c131d73eb5a174b/Qwen2.5-0.5B-Instruct-Q4_0.gguf',
+  size: 352_972_352,
+  sha256: 'c8cd5f37dd1235fb010c45316d4ff8af875e1a4e0ff368b4bf6cacb9053d4919',
 } satisfies WeightSpec;
 
 export function packagedWeightPath() {
