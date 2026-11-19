@@ -50,6 +50,17 @@ test('Normal is the default; modes select distinct generation profiles without r
   assert.match(await textOf(reply), /Asia\/Tokyo/);
 });
 
+test('translation is an explicit task even in Creative and does not pull live clock context from the source text', async () => {
+  const response = await handleChat(chat('/translate Spanish: That is today’s date.', 'creative'), { generate: async (messages, _, text, evidence) => {
+    assert.equal(evidence.mode, 'creative');
+    assert.equal(evidence.task, 'translate');
+    assert.equal(evidence.clock, undefined);
+    assert.match(messages.at(-1)!.content, /only the translation in Spanish.*today’s date/s);
+    text('Esa es la fecha de hoy.');
+  } });
+  assert.equal(await textOf(response), 'Esa es la fecha de hoy.');
+});
+
 test('the prompt can propose workspace tools, but attachment text never invokes tools or network', async () => {
   assert.deepEqual(workspaceIntent('/run ```js\nconsole.log(6 * 7)\n```'), { id: 'script', input: 'console.log(6 * 7)' });
   assert.deepEqual(workspaceIntent('Run this script:\nconsole.log(20 * 6)'), { id: 'script', input: 'console.log(20 * 6)' });

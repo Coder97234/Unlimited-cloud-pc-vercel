@@ -3,7 +3,7 @@ import { brandedStream } from '../shared/branding.ts';
 import { ASSISTANT_PROFILE, DEFAULT_MODEL, MAX_ATTACHMENT, MAX_CONTEXT, MAX_MESSAGES, MAX_PROMPT, REPLY_SKILL_HEADER, REPLY_SOURCE_HEADER, withAttachment } from '../shared/models.ts';
 import type { Availability, ChatMessage, ReplySource, TextAttachment } from '../shared/models.ts';
 import { allowsSearchToggle, explicitSearchQuery, MAX_SEARCH_QUERY } from '../shared/search.ts';
-import { SKILL_IDS, skillAvailable } from '../shared/skill-catalog.ts';
+import { readSkillCommand, SKILL_IDS, skillAvailable } from '../shared/skill-catalog.ts';
 import type { SkillResultId } from '../shared/skill-catalog.ts';
 import { modelMessage, runInstantSkill } from '../shared/skills.ts';
 import { clockReply, contextualClock, validTimeZone } from './clock.ts';
@@ -191,7 +191,8 @@ export async function handleChat(request: Request, options: ChatOptions = {}): P
       }
     }
     const branded = brandedStream(output.text);
-    await generate(messages, signal, branded.text, { sources, clock: contextualClock(prompt, input.timeZone, now), mode: input.mode });
+    const task = !input.query && readSkillCommand(prompt)?.id === 'translate' ? 'translate' : undefined;
+    await generate(messages, signal, branded.text, { sources, task, clock: task ? undefined : contextualClock(prompt, input.timeZone, now), mode: input.mode });
     branded.finish();
   }, request.signal), 'server');
 }
