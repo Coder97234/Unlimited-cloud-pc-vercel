@@ -1,22 +1,21 @@
-import {
-  ArrowLeft, ArrowUpRight, ChevronDown, Columns2, Moon, PanelLeftOpen, Sparkles, Sun, X,
-} from 'lucide-react';
+import { ArrowUpRight, Clock3, Moon, PanelLeftOpen, Sparkles, Sun, X } from 'lucide-react';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { DEFAULT_MODEL, isModelId, MODELS, SERVER_MODELS } from '../shared/models.ts';
-import type { Availability, ModelId } from '../shared/models.ts';
-import { HeroMark, ModelIcon } from './components/Brand.tsx';
+import { DEFAULT_MODEL } from '../shared/models.ts';
+import type { Availability } from '../shared/models.ts';
+import { explicitSearchQuery, MAX_SEARCH_QUERY } from '../shared/search.ts';
+import { HeroMark } from './components/Brand.tsx';
 import { Composer } from './components/Composer.tsx';
 import { Dialog } from './components/Dialog.tsx';
 import { Sidebar } from './components/Sidebar.tsx';
 import { Suggestions } from './components/Suggestions.tsx';
 import { Transcript } from './components/Transcript.tsx';
-import { AboutDialog, ModelDialog, SearchDialog, SettingsDialog } from './components/WorkspaceDialogs.tsx';
+import { AboutDialog, SearchDialog, SettingsDialog } from './components/WorkspaceDialogs.tsx';
 import type { Theme } from './components/WorkspaceDialogs.tsx';
 import { buildMessages, loadThreads, MAX_THREADS, MAX_TURNS, storeThreads, titleForPrompt } from './lib/history.ts';
-import type { Answer, Attachment, ChatMode, Thread, Turn } from './lib/history.ts';
+import type { Answer, Attachment, Thread, Turn } from './lib/history.ts';
 import { ChatError, streamChat } from './lib/stream.ts';
 
-type Modal = { kind: 'models'; lane?: 0 | 1 } | { kind: 'delete'; thread: Thread } | { kind: 'search' | 'settings' | 'about' };
+type Modal = { kind: 'delete'; thread: Thread } | { kind: 'search' | 'settings' | 'about' };
 
 function readTheme(): Theme {
   try { return localStorage.getItem('xyvora.theme') === 'dark' ? 'dark' : 'light'; }
@@ -24,32 +23,14 @@ function readTheme(): Theme {
 }
 const emptyTurns: Turn[] = [];
 
-function availablePair(preferred: readonly (ModelId | undefined)[], models: readonly ModelId[]): [ModelId, ModelId] {
-  const left = preferred[0] && models.includes(preferred[0]) ? preferred[0] : models[0];
-  const right = preferred[1] && preferred[1] !== left && models.includes(preferred[1])
-    ? preferred[1] : models.find((id) => id !== left)!;
-  return [left, right];
-}
-
-function CompareModels({ models, onChoose, compact = false }: { models: [ModelId, ModelId]; onChoose: (lane: 0 | 1) => void; compact?: boolean }) {
-  return <div className={`compare-models${compact ? ' compare-models-compact' : ''}`}>
-    {([0, 1] as const).map((lane) => <button type="button" key={lane} className="compare-model" onClick={() => onChoose(lane)} aria-label={`Choose ${lane === 0 ? 'left' : 'right'} model, ${MODELS[models[lane]].name}`}>
-      <ModelIcon id={models[lane]} size={20} />
-      <span><small>MODEL {lane === 0 ? 'A' : 'B'}</small><strong>{MODELS[models[lane]].name}</strong></span><ChevronDown size={17} />
-    </button>)}
-  </div>;
-}
-
 export default function App() {
   const [threads, setThreads] = useState(loadThreads);
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [view, setView] = useState<ChatMode>('chat');
   const [draft, setDraft] = useState('');
   const [attachment, setAttachment] = useState<Attachment>();
-  const [model, setModel] = useState<ModelId>(DEFAULT_MODEL);
-  const [pair, setPair] = useState<[ModelId, ModelId]>([...SERVER_MODELS]);
-  const [models, setModels] = useState<readonly ModelId[]>(SERVER_MODELS);
   const [availability, setAvailability] = useState<Availability | 'loading'>('loading');
+  const [canSearch, setCanSearch] = useState(false);
+  const [webSearch, setWebSearch] = useState(false);
   const [theme, setTheme] = useState<Theme>(readTheme);
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -62,6 +43,7 @@ export default function App() {
   const followReplies = useRef(true);
   const active = threads.find((thread) => thread.id === activeId);
   const turns = active?.turns ?? emptyTurns;
+  const archived = active?.mode === 'compare';
 
   useEffect(() => {
     const controller = new AbortController();
@@ -69,15 +51,12 @@ export default function App() {
       if (!response.ok) throw new Error('Chat status unavailable');
       const data = await response.json();
       if (controller.signal.aborted) return;
-      const available = Array.isArray(data?.models) ? [...new Set<ModelId>(data.models.filter(isModelId))] : [];
-      if ((data?.availability !== 'server' && data?.availability !== 'preview') || available.length < 2) {
+      if ((data?.availability !== 'server' && data?.availability !== 'preview') || !data?.models?.includes(DEFAULT_MODEL)) {
         setAvailability('unavailable');
         return;
       }
       setAvailability(data.availability);
-      setModels(available);
-      setModel((current) => available.includes(current) ? current : available[0]);
-      setPair((current) => availablePair(current, available));
+      setCanSearch(data.webSearch === true);
     }).catch(() => { if (!controller.signal.aborted) setAvailability('unavailable'); });
     return () => controller.abort();
   }, []);
@@ -102,36 +81,29 @@ export default function App() {
   const closeModal = () => setModal(null);
   const focusPrompt = () => requestAnimationFrame(() => textarea.current?.focus());
   const stop = () => controllerRef.current?.abort();
-  function setNew(mode: ChatMode = 'chat') {
+  function setNew() {
     stop();
-    setView(mode);
     setActiveId(null);
     setDraft('');
     setAttachment(undefined);
+    setWebSearch(false);
     setMobileOpen(false);
     followReplies.current = true;
     focusPrompt();
   }
-  function openView(mode: ChatMode) {
-    if (view === mode) { setMobileOpen(false); return; }
-    setNew(mode);
-  }
   function showThread(thread: Thread) {
     if (thread.id !== activeId) stop();
-    setView(thread.mode);
     setActiveId(thread.id);
     setDraft('');
     setAttachment(undefined);
+    setWebSearch(false);
     setMobileOpen(false);
     setModal(null);
-    const answers = thread.turns.at(-1)?.answers;
-    if (thread.mode === 'chat' && answers?.[0]) setModel(models.includes(answers[0].model) ? answers[0].model : models[0]);
-    if (thread.mode === 'compare') setPair(availablePair([answers?.[0]?.model, answers?.[1]?.model], models));
     followReplies.current = true;
     if (pane.current) pane.current.scrollTop = pane.current.scrollHeight;
   }
   function deleteThread(thread: Thread) {
-    if (thread.id === activeId) setNew(view);
+    if (thread.id === activeId) setNew();
     setThreads((current) => current.filter(({ id }) => id !== thread.id));
     closeModal();
     setToast('Conversation deleted.');
@@ -139,10 +111,6 @@ export default function App() {
   function toggleSidebar() {
     if (matchMedia('(max-width: 760px)').matches) setMobileOpen((open) => !open);
     else setCollapsed((closed) => !closed);
-  }
-  function openModels(lane?: 0 | 1) {
-    setMobileOpen(false);
-    setModal({ kind: 'models', lane: lane ?? (view === 'compare' ? 0 : undefined) });
   }
   function toggleTheme() { setTheme((current) => current === 'dark' ? 'light' : 'dark'); }
 
@@ -158,116 +126,116 @@ export default function App() {
     }
     window.addEventListener('keydown', keyboard);
     return () => window.removeEventListener('keydown', keyboard);
-  });
+  }, []);
 
   async function run(retry?: Turn) {
     const prompt = retry?.prompt ?? draft.trim();
-    if (controllerRef.current || !prompt) return;
-    const sendingMode = view;
-    const chosen: ModelId[] = sendingMode === 'compare' ? pair : [model];
+    if (controllerRef.current || archived || !prompt) return;
+    const searchQuery = retry?.searchQuery ?? explicitSearchQuery(prompt) ?? (!retry && webSearch ? prompt : undefined);
+    if (searchQuery !== undefined) {
+      if (!canSearch) { setToast('Web search is available on xyvora.net.'); return; }
+      if (!searchQuery.trim() || searchQuery.length > MAX_SEARCH_QUERY) {
+        setToast(`Enter 1–${MAX_SEARCH_QUERY} characters for Web search.`);
+        return;
+      }
+    }
     const controller = new AbortController();
     controllerRef.current = controller;
     const historical = retry ? turns.slice(0, -1) : turns;
     const threadId = activeId ?? crypto.randomUUID();
     const turnId = retry?.id ?? crypto.randomUUID();
     const turn: Turn = {
-      id: turnId, prompt, attachment: retry ? retry.attachment : attachment,
-      answers: chosen.map((id) => ({ model: id, content: '', state: 'working' })),
+      id: turnId, prompt, searchQuery, attachment: retry ? retry.attachment : attachment,
+      answers: [{ model: DEFAULT_MODEL, content: '', state: 'working' }],
     };
     const thread: Thread = {
-      id: threadId, title: active?.title ?? titleForPrompt(prompt), mode: sendingMode,
+      id: threadId, title: active?.title ?? titleForPrompt(prompt), mode: 'chat',
       updatedAt: Date.now(), turns: [...historical, turn].slice(-MAX_TURNS),
     };
     setThreads((current) => [thread, ...current.filter(({ id }) => id !== threadId)].slice(0, MAX_THREADS));
     setActiveId(threadId);
     setBusy(true);
-    if (!retry) { setDraft(''); setAttachment(undefined); }
+    if (!retry) { setDraft(''); setAttachment(undefined); setWebSearch(false); }
     followReplies.current = true;
     focusPrompt();
 
-    const update = (lane: number, patch: Partial<Answer>) => setThreads((current) => current.map((item) => item.id !== threadId ? item : {
+    const update = (patch: Partial<Answer>) => setThreads((current) => current.map((item) => item.id !== threadId ? item : {
       ...item,
-      turns: item.turns.map((entry) => entry.id !== turnId ? entry : {
-        ...entry, answers: entry.answers.map((answer, index) => index === lane ? { ...answer, ...patch } : answer),
-      }),
+      turns: item.turns.map((entry) => entry.id !== turnId ? entry : { ...entry, answers: [{ ...entry.answers[0], ...patch }] }),
     }));
+    let content = '';
+    let frame = 0;
     try {
-      await Promise.all(chosen.map(async (id, lane) => {
-        let content = '';
-        let frame = 0;
-        const onText = (delta: string) => {
+      await streamChat(buildMessages(historical, turn), controller.signal, {
+        searchQuery,
+        onText: (delta) => {
           if (controller.signal.aborted) return;
           content = (content + delta).slice(0, 36_000);
-          if (!frame) frame = requestAnimationFrame(() => { frame = 0; update(lane, { content }); });
-        };
-        try {
-          const messages = buildMessages(historical, turn, lane, id);
-          await streamChat(id, messages, controller.signal, onText, (source) => update(lane, { source }));
-          controller.signal.throwIfAborted();
-          if (!content.trim()) throw new ChatError('The model returned an empty reply. Try a shorter prompt or choose another model.');
-          update(lane, { state: 'finished', content });
-        } catch (error) {
-          if (controller.signal.aborted) update(lane, { state: 'stopped', content });
-          else update(lane, {
-            state: 'error', content,
-            error: error instanceof ChatError ? error.message : 'The connection was interrupted. Try again.',
-          });
-        } finally { if (frame) cancelAnimationFrame(frame); }
-      }));
+          if (!frame) frame = requestAnimationFrame(() => { frame = 0; update({ content }); });
+        },
+        onSource: (source) => update({ source }),
+        onSources: (sources) => update({ sources }),
+      });
+      controller.signal.throwIfAborted();
+      if (!content.trim()) throw new ChatError('The server returned an empty reply. Try rephrasing your question.');
+      update({ state: 'finished', content });
+    } catch (error) {
+      if (controller.signal.aborted) update({ state: 'stopped', content });
+      else update({ state: 'error', content, error: error instanceof ChatError ? error.message : 'The connection was interrupted. Try again.' });
     } finally {
+      if (frame) cancelAnimationFrame(frame);
       if (controllerRef.current === controller) { controllerRef.current = null; setBusy(false); }
     }
   }
 
   const composer = <Composer draft={draft} onDraft={setDraft} textarea={textarea} attachment={attachment} onAttachment={setAttachment}
-    onAlert={setToast} onSend={() => void run()} onStop={stop} onChooseModel={() => openModels()} model={model} busy={busy} mode={view} />;
-  const compareModels = (compact = false) => <CompareModels models={pair} onChoose={openModels} compact={compact} />;
-  const pickPrompt = (prompt: string) => { setDraft(prompt); focusPrompt(); };
-  const toggleCompare = () => openView(view === 'compare' ? 'chat' : 'compare');
-  const modelDialog = modal?.kind === 'models' ? modal : null;
-  const activeLane = modelDialog?.lane;
+    onAlert={setToast} onSend={() => void run()} onStop={stop} busy={busy} webSearch={webSearch} canSearch={canSearch}
+    onToggleSearch={() => { setWebSearch((enabled) => !enabled); focusPrompt(); }} />;
+  function pickPrompt(prompt: string, search = false) {
+    if (archived) setNew();
+    setMobileOpen(false);
+    if (search && !canSearch) { setToast('Web search is available on xyvora.net.'); return; }
+    setWebSearch(search);
+    if (prompt) setDraft(prompt);
+    focusPrompt();
+  }
 
   return <div className={`app-shell${collapsed ? ' sidebar-collapsed' : ''}${mobileOpen ? ' sidebar-open' : ''}`}>
     <a href="#main-workspace" className="skip-link">Skip to chat</a>
     <button type="button" className="mobile-overlay" onClick={() => setMobileOpen(false)} aria-label="Close sidebar"><span /></button>
-    <Sidebar threads={threads} activeId={activeId} view={view} availability={availability} onNew={() => setNew()} onView={openView}
-      onSearch={() => { setMobileOpen(false); setModal({ kind: 'search' }); }} onModels={() => openModels()}
-      onSettings={() => { setMobileOpen(false); setModal({ kind: 'settings' }); }} onCollapse={toggleSidebar} onThread={showThread}
-      onDelete={(thread) => setModal({ kind: 'delete', thread })} onAbout={() => { setMobileOpen(false); setModal({ kind: 'about' }); }} />
-    <main className={`workspace${turns.length ? ' has-chat' : ''}${view === 'compare' ? ' compare-view' : ''}`} id="main-workspace">
+    <Sidebar threads={threads} activeId={activeId} availability={availability} onNew={setNew}
+      onSearch={() => { setMobileOpen(false); setModal({ kind: 'search' }); }} onWebSearch={() => pickPrompt('', true)}
+      onClock={() => pickPrompt('What time is it?')} onSettings={() => { setMobileOpen(false); setModal({ kind: 'settings' }); }}
+      onCollapse={toggleSidebar} onThread={showThread} onDelete={(thread) => setModal({ kind: 'delete', thread })}
+      onAbout={() => { setMobileOpen(false); setModal({ kind: 'about' }); }} />
+    <main className={`workspace${turns.length ? ' has-chat' : ''}`} id="main-workspace">
       <header className="topbar">
         <div className="topbar-location">
           <button type="button" className="icon-button open-sidebar" onClick={toggleSidebar} title="Open sidebar" aria-label="Open sidebar" aria-controls="workspace-sidebar"><PanelLeftOpen size={19} /></button>
           <span className="topbar-workspace">Workspace</span><span className="breadcrumb-divider">/</span>
-          <strong>{view === 'compare' ? 'Compare' : 'Chat'}</strong>
+          <strong>{archived ? 'Archive' : 'Chat'}</strong>
         </div>
         <div className="topbar-actions">
-          <button type="button" onClick={toggleCompare} className={`compare-switch${view === 'compare' ? ' compare-switch-active' : ''}`}>
-            {view === 'compare' ? <ArrowLeft size={16} /> : <Columns2 size={16} />}
-            <span>{view === 'compare' ? 'Back to chat' : 'Compare models'}</span>
-          </button>
+          <button type="button" onClick={() => pickPrompt('What time is it?')} className="clock-button"><Clock3 size={16} /><span>Local time</span></button>
           <span className="topbar-divider" aria-hidden="true" />
           <button type="button" className="icon-button theme-toggle" aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`} title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`} onClick={toggleTheme}>{theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}</button>
         </div>
       </header>
       {turns.length > 0 && active ? <>
-        {view === 'compare' && <div className="compare-thread-header">{compareModels(true)}</div>}
         <div ref={pane} className="conversation-pane" onScroll={(event) => {
           const { scrollHeight, scrollTop, clientHeight } = event.currentTarget;
           followReplies.current = scrollHeight - scrollTop - clientHeight < 130;
-        }}><Transcript thread={active} busy={busy} onRetry={() => void run(turns.at(-1))} onAlert={setToast} /></div>
-        <div className="bottom-composer"><div className="compose-width">{composer}</div></div>
+        }}><Transcript thread={active} busy={busy} onRetry={archived ? undefined : () => void run(turns.at(-1))} onAlert={setToast} /></div>
+        <div className="bottom-composer"><div className="compose-width">{archived ? <div className="archive-notice"><span>Earlier comparison · read-only</span><button type="button" className="secondary-button" onClick={setNew}>New Qwen chat</button></div> : composer}</div></div>
       </> : <div className="welcome-scroll">
         <div className="welcome">
           <div className="welcome-heading">
             <HeroMark />
-            <span className="workspace-kicker"><Sparkles size={13} strokeWidth={2.1} /> OPEN MODEL WORKSPACE</span>
-            {view === 'chat' ? <><h1>What’s on your mind<span>?</span></h1><p>Chat, create, and explore with open AI models.</p></>
-              : <><h1>One prompt, two perspectives<span>.</span></h1><p>See how two open models answer the same question.</p></>}
+            <span className="workspace-kicker"><Sparkles size={13} strokeWidth={2.1} /> POWERED BY QWEN 2.5</span>
+            <h1>What’s on your mind<span>?</span></h1><p>Chat with Qwen 2.5, search the web, or ask for the time.</p>
           </div>
-          {view === 'compare' && compareModels()}
           {composer}
-          {view === 'chat' ? <Suggestions onPick={pickPrompt} /> : <Suggestions onPick={pickPrompt} compact />}
+          <Suggestions onPick={pickPrompt} />
         </div>
       </div>}
       <footer className="main-footer">
@@ -275,12 +243,6 @@ export default function App() {
         <button type="button" className="footer-link" onClick={() => setModal({ kind: 'about' })}>About <ArrowUpRight size={12} /></button>
       </footer>
     </main>
-    {modelDialog && <ModelDialog value={activeLane === undefined ? model : pair[activeLane]} lane={activeLane} excluded={activeLane === undefined ? undefined : pair[activeLane === 0 ? 1 : 0]}
-      models={models} availability={availability} onClose={closeModal} onChoose={(id) => {
-        if (activeLane === undefined) setModel(id);
-        else setPair((current) => activeLane === 0 ? [id, current[1]] : [current[0], id]);
-        closeModal(); focusPrompt();
-      }} />}
     {modal?.kind === 'search' && <SearchDialog threads={threads} onClose={closeModal} onPick={showThread} />}
     {modal?.kind === 'settings' && <SettingsDialog theme={theme} count={threads.length} onTheme={setTheme} onClose={closeModal}
       onClear={() => { setNew(); setThreads([]); setToast('Chat history cleared.'); }} />}

@@ -3,142 +3,158 @@ import { test } from 'node:test';
 import vercelChat from '../server/vercel-chat.ts';
 import { handleChat, parseChat } from '../server/chat.ts';
 import { InferenceError } from '../server/inference-stream.ts';
+import { SEARCH_ENDPOINT, searchWeb } from '../server/web-search.ts';
 import { buildMessages, loadThreads } from '../src/lib/history.ts';
 import type { Turn } from '../src/lib/history.ts';
 import { readChatEvents } from '../src/lib/stream.ts';
+import type { WebSource } from '../shared/search.ts';
 
 const url = 'https://xyvora.invalid/api/chat';
 const message = { role: 'user', content: 'What is recursion?' };
-function request(body: unknown = { model: 'qwen-lite', messages: [message] }) {
-  return new Request(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+const body = { model: 'qwen-lite', messages: [message] };
+const source: WebSource = { title: 'Artemis', url: 'https://www.nasa.gov/humans-in-space/artemis/', excerpt: 'NASA’s Moon exploration program.' };
+function request(input: unknown = body) {
+  return new Request(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) });
+}
+async function collect(response: Response) {
+  let text = '';
+  const sources: WebSource[] = [];
+  await readChatEvents(response.body!, (delta) => { text += delta; }, true, (found) => sources.push(...found));
+  return { text, sources };
 }
 
-test('only accepts allowlisted server and Gateway models and alternating user/assistant messages', () => {
-  assert.deepEqual(parseChat({ model: 'qwen-lite', messages: [message] }), { model: 'qwen-lite', messages: [message] });
-  assert.equal(parseChat({ model: 'qwen', messages: [message] }).model, 'qwen');
-  for (const model of ['local', 'toString', 'unknown', 'https://example.org']) {
-    assert.throws(() => parseChat({ model, messages: [message] }), /supported model/);
+test('accepts only Qwen 2.5 with bounded alternating user and assistant messages', () => {
+  assert.deepEqual(parseChat(body), { messages: [message], timeZone: 'UTC', query: undefined });
+  for (const model of ['local', 'qwen', 'smollm', 'gpt-oss', 'mistral', 'toString', 'https://example.org']) {
+    assert.throws(() => parseChat({ ...body, model }), /only supported model/);
   }
-  assert.throws(() => parseChat({ model: 'qwen', messages: [{ role: 'system', content: 'hello' }] }), /roles/);
-  assert.throws(() => parseChat({ model: 'qwen', messages: [message, message] }), /ending with a user/);
-  assert.throws(() => parseChat({ model: 'qwen', messages: [{ role: 'user', content: 'a'.repeat(16_001) }] }), /too long/);
-  assert.throws(() => parseChat({ model: 'smollm', messages: [{ role: 'user', content: 'a'.repeat(8_001) }] }), /too long/);
+  assert.throws(() => parseChat({ ...body, messages: [{ role: 'system', content: 'hello' }] }), /roles/);
+  assert.throws(() => parseChat({ ...body, messages: [message, message] }), /ending with a user/);
+  assert.throws(() => parseChat({ ...body, messages: [{ role: 'user', content: 'a'.repeat(8_001) }] }), /too long/);
+  assert.throws(() => parseChat({ ...body, timeZone: 'Planet/Mars' }), /IANA/);
+  assert.throws(() => parseChat({ ...body, searchQuery: 'a'.repeat(351) }), /web search query/);
 });
 
 test('a missing backend never looks like successful inference', async () => {
-  const status = await handleChat(new Request(url));
-  assert.equal((await status.json()).availability, 'unavailable');
+  assert.equal((await (await handleChat(new Request(url))).json()).availability, 'unavailable');
   const reply = await handleChat(request());
   assert.equal(reply.status, 503);
   assert.equal((await reply.json()).code, 'MODEL_UNAVAILABLE');
 });
 
-test('Vercel defaults to its own server models and opts into Gateway with request-scoped OIDC', async (t) => {
-  const { VERCEL, AI_GATEWAY_API_KEY, VERCEL_OIDC_TOKEN, XYVORA_ENABLE_GATEWAY } = process.env;
-  t.after(() => {
-    for (const [key, value] of Object.entries({ VERCEL, AI_GATEWAY_API_KEY, VERCEL_OIDC_TOKEN, XYVORA_ENABLE_GATEWAY })) {
-      if (value === undefined) delete process.env[key]; else process.env[key] = value;
-    }
-  });
-  process.env.VERCEL = '1';
-  delete process.env.AI_GATEWAY_API_KEY;
-  delete process.env.VERCEL_OIDC_TOKEN;
-  delete process.env.XYVORA_ENABLE_GATEWAY;
-  const statusRequest = () => new Request(url, { headers: { 'x-vercel-oidc-token': 'mock-runtime-token' } });
-  const server = await (await vercelChat.fetch(statusRequest())).json();
-  assert.deepEqual(server, { availability: 'server', models: ['qwen-lite', 'smollm'] });
-  process.env.XYVORA_ENABLE_GATEWAY = '1';
-  const withGateway = await (await vercelChat.fetch(statusRequest())).json();
-  assert.deepEqual(withGateway.models, ['qwen-lite', 'smollm', 'qwen', 'gpt-oss', 'mistral']);
-  assert.ok(!JSON.stringify(withGateway).includes('mock-runtime-token'));
+test('Vercel advertises only Qwen and live web search, regardless of old Gateway headers', async () => {
+  const reply = await vercelChat.fetch(new Request(url, { headers: { 'x-vercel-oidc-token': 'mock-runtime-token' } }));
+  assert.deepEqual(await reply.json(), { availability: 'server', models: ['qwen-lite'], webSearch: true });
+  assert.equal((await vercelChat.fetch(request({ ...body, model: 'smollm' }))).status, 400);
 });
 
-test('development preview streams labeled sample responses', async () => {
+test('development preview streams labeled samples and rejects live search', async () => {
   const reply = await handleChat(request(), { preview: true });
-  assert.equal(reply.status, 200);
   assert.match(reply.headers.get('content-type') ?? '', /event-stream/);
   assert.equal(reply.headers.get('x-xyvora-source'), 'preview');
-  let text = '';
-  await readChatEvents(reply.body!, (delta) => { text += delta; });
-  assert.match(text, /Sample response/);
-  assert.match(text, /nesting dolls/);
+  assert.match((await collect(reply)).text, /Sample response.*nesting dolls/s);
+  const search = await handleChat(request({ ...body, searchQuery: 'NASA' }), { preview: true });
+  assert.equal(search.status, 503);
+  assert.equal((await search.json()).code, 'SEARCH_UNAVAILABLE');
 });
 
-test('server routes approved requests with the server token and returns the reply stream', async () => {
-  const reply = await handleChat(request({ model: 'gpt-oss', messages: [message] }), {
-    token: 'test-token',
-    requestFetch: async (target, options) => {
-      assert.equal(target, 'https://ai-gateway.vercel.sh/v1/chat/completions');
-      assert.equal(new Headers(options?.headers).get('Authorization'), 'Bearer test-token');
-      const data = JSON.parse(String(options?.body));
-      assert.equal(data.model, 'openai/gpt-oss-20b');
-      assert.equal(data.stream, true);
-      assert.equal(data.max_tokens, 2_048);
-      assert.equal(data.messages[0].role, 'system');
-      assert.deepEqual(data.messages[1], message);
-      return new Response('data: {"choices":[{"delta":{"content":"hello"}}]}\n\ndata: [DONE]\n\n', { headers: { 'Content-Type': 'text/event-stream' } });
-    },
-  });
-  let text = '';
-  await readChatEvents(reply.body!, (delta) => { text += delta; });
-  assert.equal(text, 'hello');
-  assert.ok(!JSON.stringify([...reply.headers]).includes('test-token'));
-});
-
-test('blocks oversized bodies without invoking the model', async () => {
+test('blocks oversized bodies before inference or search', async () => {
   const tooBig = new Request(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: 'a'.repeat(90_000) });
   assert.equal((await handleChat(tooBig)).status, 413);
 });
 
-test('stream parser handles split CRLF frames and multibyte text without forwarding reasoning', async () => {
-  const bytes = new TextEncoder().encode('data: {"choices":[{"delta":{"reasoning_content":"not the answer","content":"héllo"}}]}\r\n\r\ndata: [DONE]\r\n\r\n');
-  const body = new ReadableStream<Uint8Array>({ start(controller) {
+test('stream parser handles split CRLF and multibyte frames, validating source metadata', async () => {
+  const sources = JSON.stringify({ sources: [source, { title: 'Bad link', url: 'javascript:alert(1)' }] });
+  const bytes = new TextEncoder().encode(`data: ${sources}\r\n\r\ndata: {"choices":[{"delta":{"reasoning_content":"not the answer","content":"héllo"}}]}\r\n\r\ndata: [DONE]\r\n\r\n`);
+  const stream = new ReadableStream<Uint8Array>({ start(controller) {
     for (let i = 0; i < bytes.length; i += 2) controller.enqueue(bytes.slice(i, i + 2));
     controller.close();
   } });
-  let text = '';
-  await readChatEvents(body, (delta) => { text += delta; });
-  assert.equal(text, 'héllo');
+  assert.deepEqual(await collect(new Response(stream)), { text: 'héllo', sources: [source] });
 });
 
-test('comparison builds an independent context per model and skips failed replies', () => {
-  const previous: Turn[] = [{
-    id: 'turn-one', prompt: 'Hi', answers: [
-      { model: 'qwen', content: 'left answer', source: 'hosted', state: 'finished' },
-      { model: 'gpt-oss', content: 'right answer', source: 'hosted', state: 'finished' },
-    ],
-  }, {
-    id: 'turn-two', prompt: 'Unanswered', answers: [{ model: 'qwen', content: '', source: 'hosted', state: 'error' }],
-  }];
-  const current = { prompt: 'Next question', attachment: { name: 'context.txt', text: 'Some context' } };
-  const left = buildMessages(previous, current, 0, 'qwen');
-  const right = buildMessages(previous, current, 1, 'gpt-oss');
-  assert.equal(left[1]?.content, 'left answer');
-  assert.equal(right[1]?.content, 'right answer');
-  assert.equal(left.length, 3);
-  assert.match(left.at(-1)!.content, /context\.txt/);
-});
-
-test('server inference streams partial text without a Gateway token', async () => {
+test('streams Qwen text immediately and does not search on normal prompts', async () => {
   let finish!: () => void;
   const completion = new Promise<void>((resolve) => { finish = resolve; });
-  const response = await handleChat(request(), { generate: async (id, messages, _signal, onText) => {
-    assert.equal(id, 'qwen-lite');
-    assert.deepEqual(messages, [message]);
-    onText('First part.');
-    await completion;
-    onText(' Then more.');
-  } });
+  const response = await handleChat(request(), {
+    search: async () => assert.fail('an ordinary prompt must not be sent to the web'),
+    generate: async (messages, _signal, onText, evidence) => {
+      assert.deepEqual(messages, [message]);
+      assert.equal(evidence.sources, undefined);
+      onText('First part.');
+      await completion;
+      onText(' Then more.');
+    },
+  });
   assert.equal(response.headers.get('x-xyvora-source'), 'server');
   let text = '';
-  await readChatEvents(response.body!, (delta) => {
-    text += delta;
-    finish();
-  });
+  await readChatEvents(response.body!, (delta) => { text += delta; finish(); });
   assert.equal(text, 'First part. Then more.');
 });
 
-test('server inference errors and empty outputs are not completed replies', async () => {
+test('answers time, dates and named zones without inference or web search', async () => {
+  const now = () => new Date('2026-11-18T23:35:00Z');
+  for (const [content, expected] of [
+    ['What time is it?', /5:35 PM CST.*America\/Chicago/],
+    ['What time is it in Tokyo right now?', /8:35 AM GMT\+9.*Thursday, November 19, 2026.*Asia\/Tokyo/],
+    ['What’s today’s date?', /Wednesday, November 18, 2026/],
+    ['What is my time zone?', /America\/Chicago/],
+    ['What time is it in Atlantis?', /couldn’t match.*time zone/],
+  ] as const) {
+    const response = await handleChat(request({ ...body, timeZone: 'America/Chicago', messages: [{ role: 'user', content }] }), {
+      now, search: async () => assert.fail('clock does not use search'), generate: async () => assert.fail('clock does not use token generation'),
+    });
+    assert.equal(response.headers.get('x-xyvora-source'), 'clock');
+    assert.match((await collect(response)).text, expected);
+  }
+});
+
+test('search uses just the explicit latest query; it emits numbered sources before generation', async () => {
+  const messages = [message, { role: 'assistant', content: 'Private history' }, { role: 'user', content: '/search NASA Artemis\n\nAttached text file (private.txt):\nprivate attachment' }];
+  let received = false;
+  let release!: () => void;
+  const sent = new Promise<void>((resolve) => { release = resolve; });
+  const response = await handleChat(request({ ...body, messages }), {
+    search: async (query) => { assert.equal(query, 'NASA Artemis'); return [source]; },
+    generate: async (receivedMessages, _signal, onText, evidence) => {
+      assert.deepEqual(evidence.sources, [source]);
+      assert.deepEqual(receivedMessages, messages);
+      await sent;
+      onText('Artemis explores the Moon [1].');
+    },
+  });
+  let text = '';
+  await readChatEvents(response.body!, (delta) => { assert.ok(received); text += delta; }, true, (sources) => {
+    assert.deepEqual(sources, [source]); received = true; release();
+  });
+  assert.match(text, /Moon \[1\]/);
+});
+
+test('empty or failed web search never passes unsupported facts to the model', async () => {
+  const input = { ...body, searchQuery: 'No such results' };
+  const generate = async () => assert.fail('no evidence supplied');
+  const none = await handleChat(request(input), { generate, search: async () => [] });
+  assert.match((await collect(none)).text, /couldn’t find relevant web results/);
+  const failed = await handleChat(request(input), { generate, search: async () => { throw new InferenceError('Web search is unavailable.'); } });
+  await assert.rejects(collect(failed), /Web search is unavailable/);
+});
+
+test('public search sends only the bounded query and normalizes provider data', async () => {
+  const result = await searchWeb('NASA', new AbortController().signal, async (url, init) => {
+    assert.equal(url, SEARCH_ENDPOINT);
+    assert.equal(init?.redirect, 'error');
+    assert.equal(new Headers(init?.headers).get('X-Keenable-Title'), 'Xyvora');
+    assert.deepEqual(JSON.parse(String(init?.body)), { query: 'NASA', max_results: 4, snippet_max_length: 300 });
+    return Response.json({ results: [
+      { title: '<mark>Artemis</mark>', url: source.url, snippet: source.excerpt },
+      { title: 'duplicate', url: `${source.url}#duplicate` },
+      { title: 'invalid', url: 'data:text/html,abc' },
+    ] });
+  });
+  assert.deepEqual(result, [source]);
+});
+
+test('inference errors and empty streams do not claim successful completion', async () => {
   for (const generate of [
     async () => { throw new InferenceError('The server is warming up.'); },
     async () => { throw new Error('internal details'); },
@@ -146,46 +162,39 @@ test('server inference errors and empty outputs are not completed replies', asyn
   ]) {
     const response = await handleChat(request(), { generate });
     const [parsed, raw] = response.body!.tee();
-    const [data] = await Promise.all([
-      new Response(raw).text(),
-      assert.rejects(readChatEvents(parsed, () => {}, true), /server|empty reply/),
-    ]);
+    const [data] = await Promise.all([new Response(raw).text(), assert.rejects(collect(new Response(parsed)), /server|empty reply/)]);
     assert.ok(!data.includes('[DONE]'));
     assert.ok(!data.includes('internal details'));
   }
 });
 
-test('canceling the stream aborts inference', async () => {
-  let observed = false;
-  const response = await handleChat(request(), { generate: async (_id, _messages, signal) => {
-    await new Promise<void>((resolve) => signal.addEventListener('abort', () => { observed = true; resolve(); }, { once: true }));
-  } });
-  await response.body!.cancel();
-  assert.ok(observed);
+test('canceling a stream aborts generation and external lookup', async () => {
+  for (const useSearch of [false, true]) {
+    let observed = false;
+    const wait = (signal: AbortSignal) => new Promise<void>((resolve) => signal.addEventListener('abort', () => { observed = true; resolve(); }, { once: true }));
+    const response = await handleChat(request({ ...body, searchQuery: useSearch ? 'NASA' : undefined }), {
+      generate: async (_messages, signal) => { if (useSearch) assert.fail('search was canceled'); else await wait(signal); },
+      search: async (_query, signal) => { await wait(signal); signal.throwIfAborted(); return []; },
+    });
+    await response.body!.cancel();
+    assert.ok(observed);
+  }
 });
 
-test('Gateway refusal is not silently replaced by a sample or different model', async () => {
-  const response = await handleChat(request({ model: 'qwen', messages: [message] }), {
-    token: 'test-token',
-    generate: async () => assert.fail('should not switch models without the user choosing'),
-    requestFetch: async () => new Response('{"error":"customer_verification_required"}', { status: 403 }),
-  });
-  assert.equal(response.status, 503);
-  assert.equal((await response.json()).code, 'GATEWAY_UNAVAILABLE');
-});
-
-test('preserves legacy browser-generated chat history without sending it to the server', (t) => {
-  const raw = [{ id: 'legacy', title: 'Old chat', mode: 'chat', turns: [
-    { id: '1', prompt: 'A formerly private message', answers: [{ model: 'local', source: 'on-device', state: 'finished', content: 'A retained reply' }] },
-    { id: '2', prompt: 'Retry this', answers: [{ model: 'local', source: 'on-device', state: 'error', content: '', error: 'An outdated GPU error' }] },
-  ] }];
-  const previous = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+test('retains older replies but sends only completed Qwen context to new requests', (t) => {
+  const previous: Turn[] = [
+    { id: 'q', prompt: 'Hello', answers: [{ model: 'qwen-lite', source: 'server', state: 'finished', content: 'Hi there!' }] },
+    { id: 's', prompt: 'Earlier question', answers: [{ model: 'smollm', source: 'legacy', state: 'finished', content: 'An archived reply' }] },
+  ];
+  const raw = [{ id: 'legacy', title: 'Old chat', mode: 'compare', turns: [...previous, { id: '1', prompt: 'Previously private', answers: [{ model: 'local', source: 'on-device', state: 'finished', content: 'A retained reply' }] }] }];
+  const storage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
   Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: { getItem: () => JSON.stringify(raw) } });
-  t.after(() => { if (previous) Object.defineProperty(globalThis, 'localStorage', previous); else Reflect.deleteProperty(globalThis, 'localStorage'); });
+  t.after(() => { if (storage) Object.defineProperty(globalThis, 'localStorage', storage); else Reflect.deleteProperty(globalThis, 'localStorage'); });
   const [thread] = loadThreads();
-  assert.equal(thread.turns[0].answers[0].content, 'A retained reply');
-  assert.equal(thread.turns[0].answers[0].model, 'qwen-lite');
-  assert.equal(thread.turns[0].answers[0].source, 'legacy');
-  assert.match(thread.turns[1].answers[0].error ?? '', /Retry.*server/);
-  assert.deepEqual(buildMessages(thread.turns, { prompt: 'Next question' }, 0, 'qwen-lite'), [{ role: 'user', content: 'Next question' }]);
+  assert.equal(thread.mode, 'compare');
+  assert.equal(thread.turns[1].answers[0].model, 'smollm');
+  assert.equal(thread.turns[2].answers[0].source, 'legacy');
+  assert.deepEqual(buildMessages(thread.turns, { prompt: 'Next question' }), [
+    { role: 'user', content: 'Hello' }, { role: 'assistant', content: 'Hi there!' }, { role: 'user', content: 'Next question' },
+  ]);
 });

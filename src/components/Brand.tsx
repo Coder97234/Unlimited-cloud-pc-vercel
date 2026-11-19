@@ -1,6 +1,5 @@
 import { BrainCircuit, Feather, Orbit, Wind } from 'lucide-react';
-import { MODELS } from '../../shared/models.ts';
-import type { ModelId } from '../../shared/models.ts';
+import type { SavedModelId } from '../lib/history.ts';
 
 export function Mark({ className = '' }: { className?: string }) {
   return <span className={`xy-mark ${className}`} aria-hidden="true">
@@ -25,7 +24,8 @@ export function HeroMark() {
 }
 
 const MODEL_ICONS = { 'qwen-lite': Orbit, smollm: Feather, qwen: Orbit, 'gpt-oss': BrainCircuit, mistral: Wind };
-export function ModelIcon({ id, size = 17, className = '' }: { id: ModelId; size?: number; className?: string }) {
+const MODEL_TINT = { 'qwen-lite': 'violet', smollm: 'sky', qwen: 'violet', 'gpt-oss': 'mint', mistral: 'peach' };
+export function ModelIcon({ id, size = 17, className = '' }: { id: SavedModelId; size?: number; className?: string }) {
   const Icon = MODEL_ICONS[id];
-  return <span className={`model-icon tint-${MODELS[id].color} ${className}`} aria-hidden="true"><Icon size={size} strokeWidth={1.9} /></span>;
+  return <span className={`model-icon tint-${MODEL_TINT[id]} ${className}`} aria-hidden="true"><Icon size={size} strokeWidth={1.9} /></span>;
 }

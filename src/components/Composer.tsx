@@ -1,9 +1,8 @@
-import { ArrowUp, ChevronDown, Paperclip, Plus, Square, X } from 'lucide-react';
+import { ArrowUp, Globe, Paperclip, Plus, Square, X } from 'lucide-react';
 import { useLayoutEffect, useRef } from 'react';
 import type { ChangeEvent, RefObject } from 'react';
-import { MAX_ATTACHMENT, MAX_PROMPT, MODELS } from '../../shared/models.ts';
-import type { ModelId } from '../../shared/models.ts';
-import type { Attachment, ChatMode } from '../lib/history.ts';
+import { DEFAULT_MODEL, MAX_ATTACHMENT, MAX_PROMPT, MODEL_NAME } from '../../shared/models.ts';
+import type { Attachment } from '../lib/history.ts';
 import { ModelIcon } from './Brand.tsx';
 
 type Props = {
@@ -15,13 +14,13 @@ type Props = {
   onAlert: (text: string) => void;
   onSend: () => void;
   onStop: () => void;
-  onChooseModel: () => void;
-  model: ModelId;
+  webSearch: boolean;
+  canSearch: boolean;
+  onToggleSearch: () => void;
   busy: boolean;
-  mode: ChatMode;
 };
 
-export function Composer({ draft, onDraft, textarea, attachment, onAttachment, onAlert, onSend, onStop, onChooseModel, model, busy, mode }: Props) {
+export function Composer({ draft, onDraft, textarea, attachment, onAttachment, onAlert, onSend, onStop, webSearch, canSearch, onToggleSearch, busy }: Props) {
   const fileInput = useRef<HTMLInputElement>(null);
   useLayoutEffect(() => {
     const field = textarea.current;
@@ -54,8 +53,7 @@ export function Composer({ draft, onDraft, textarea, attachment, onAttachment, o
     </div>}
     <textarea
       ref={textarea} value={draft} maxLength={MAX_PROMPT} onChange={(event) => onDraft(event.target.value)} rows={2}
-      placeholder={mode === 'compare' ? 'Ask both models the same question…' : 'Ask Xyvora anything…'}
-      aria-label={mode === 'compare' ? 'Prompt for both models' : 'Message Xyvora'}
+      placeholder={webSearch ? 'What should I look up?…' : 'Ask Xyvora anything…'} aria-label="Message Xyvora"
       onKeyDown={(event) => {
         if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
           event.preventDefault();
@@ -67,10 +65,11 @@ export function Composer({ draft, onDraft, textarea, attachment, onAttachment, o
       <div className="composer-tools">
         <input type="file" ref={fileInput} hidden accept=".txt,.md,.csv,.json,.js,.ts,.py" onChange={(event) => void attach(event)} />
         <button type="button" className="attach-button" title="Attach a text file" aria-label="Attach a text file" onClick={() => fileInput.current?.click()}><Plus size={19} /></button>
-        {mode === 'chat' && <button type="button" className="model-chip" aria-label={`Choose model, current model ${MODELS[model].name}`} onClick={onChooseModel}>
-          <ModelIcon id={model} size={14} /><span>{MODELS[model].name}</span><ChevronDown size={14} className="chevron" />
-        </button>}
-        {mode === 'compare' && <span className="composer-compare-label">Sends to both models</span>}
+        <span className="model-chip"><ModelIcon id={DEFAULT_MODEL} size={14} /><span>{MODEL_NAME}</span></span>
+        <button type="button" className="web-search-chip" aria-pressed={webSearch} disabled={!canSearch || busy}
+          title={canSearch ? 'Search the web with just this prompt' : 'Available on the live site'} onClick={onToggleSearch}>
+          <Globe size={16} /><span>Web search</span>
+        </button>
       </div>
       <div className="composer-actions">
         {draft.length > MAX_PROMPT - 400 && <span className="char-count">{draft.length}/{MAX_PROMPT}</span>}
@@ -79,5 +78,6 @@ export function Composer({ draft, onDraft, textarea, attachment, onAttachment, o
           : <button type="submit" className="send-button" title="Send message" aria-label="Send message" disabled={!draft.trim()}><ArrowUp size={21} strokeWidth={2.3} /></button>}
       </div>
     </div>
+    {webSearch && <p className="search-disclosure">Only this prompt is sent to the search provider. Don’t include private information.</p>}
   </form>;
 }

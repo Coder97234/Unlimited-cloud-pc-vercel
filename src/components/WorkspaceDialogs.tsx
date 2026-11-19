@@ -1,33 +1,9 @@
-import { ArrowUpRight, Check, Columns2, HardDrive, MessageSquare, Moon, Search, ShieldCheck, Sun, Trash2 } from 'lucide-react';
+import { Columns2, HardDrive, MessageSquare, Moon, Search, Sun, Trash2 } from 'lucide-react';
 import { useState } from 'react';
-import { MODELS } from '../../shared/models.ts';
-import type { Availability, ModelId } from '../../shared/models.ts';
 import type { Thread } from '../lib/history.ts';
-import { ModelIcon } from './Brand.tsx';
 import { Dialog } from './Dialog.tsx';
 
 export type Theme = 'light' | 'dark';
-
-export function ModelDialog({ value, excluded, lane, models, availability, onClose, onChoose }: {
-  value: ModelId; excluded?: ModelId; lane?: 0 | 1; models: readonly ModelId[]; availability: Availability | 'loading';
-  onClose: () => void; onChoose: (id: ModelId) => void;
-}) {
-  return <Dialog title="Choose a model" subtitle={lane === undefined ? 'Open models with different strengths. Switch at any time.' : `Pick a model for the ${lane === 0 ? 'left' : 'right'} side of the comparison.`} onClose={onClose}>
-    <div className="model-options">
-      {models.map((id) => <div key={id} className={`model-option${id === value ? ' selected' : ''}`}>
-        <button type="button" disabled={id === excluded} className="model-option-select" onClick={() => onChoose(id)}>
-          <ModelIcon id={id} size={20} /><span className="model-option-text"><strong>{MODELS[id].name}</strong><small>{MODELS[id].description}</small></span>
-          {id === value ? <Check size={18} className="option-check" /> : <span className="model-tag">{id === excluded ? 'Other side' : MODELS[id].tag}</span>}
-        </button>
-        <a className="bare-icon model-link" href={MODELS[id].weights} target="_blank" rel="noopener noreferrer" title="View model weights" aria-label={`${MODELS[id].name} model weights`}><ArrowUpRight size={16} /></a>
-      </div>)}
-    </div>
-    <div className="dialog-note"><ShieldCheck size={16} />
-      {availability === 'preview' ? 'Replies are labeled samples in this interface preview.'
-        : 'Replies run on a server. The first reply can take longer while a model starts.'}
-    </div>
-  </Dialog>;
-}
 
 export function SearchDialog({ threads, onClose, onPick }: { threads: Thread[]; onClose: () => void; onPick: (thread: Thread) => void }) {
   const [query, setQuery] = useState('');
@@ -70,11 +46,12 @@ export function SettingsDialog({ theme, count, onTheme, onClear, onClose }: {
 }
 
 export function AboutDialog({ onClose }: { onClose: () => void }) {
-  return <Dialog title="About Xyvora" subtitle="A place to chat with open models and compare their answers." onClose={onClose}>
+  return <Dialog title="About Xyvora" subtitle="Qwen 2.5 chat with live tools." onClose={onClose}>
     <div className="about-content">
-      <p><strong>Chat:</strong> Choose a model and start a conversation. Switch models whenever you want another perspective.</p>
-      <p><strong>Compare:</strong> Send the same prompt to two server models and read their answers side by side.</p>
-      <p><strong>Privacy:</strong> Chat history is saved in this browser. Your prompt, recent messages, and any attached text are sent to the Xyvora server to generate a reply. Gateway models, when enabled, also send that context to the model provider.</p>
+      <p><strong>Chat:</strong> Qwen 2.5 is the only AI model. Earlier chats and comparisons stay in your history.</p>
+      <p><strong>Web search:</strong> Turn on Web search for a prompt or type <code>/search</code> followed by a query. Results link to their original pages. The public search service may rate-limit requests.</p>
+      <p><strong>Time and date:</strong> Ask for the time, today’s date, or the time in a city such as Tokyo. The live clock uses your device’s time zone unless you ask for another.</p>
+      <p><strong>Privacy:</strong> History stays in this browser. Xyvora sends the prompt, recent context, and attached text to its server for replies. When you use Web search, the search query alone is sent to <a href="https://docs.keenable.ai/api-reference" target="_blank" rel="noopener noreferrer">Keenable</a>, which logs queries. Do not include private information in a search.</p>
     </div>
   </Dialog>;
 }

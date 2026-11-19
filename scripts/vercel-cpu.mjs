@@ -12,3 +12,7 @@ await access(join(scope, 'linux-x64', 'bins', 'linux-x64', 'llama-addon.node'));
 for (const name of await readdir(scope)) {
   if (name !== 'linux-x64') await rm(join(scope, name), { recursive: true, force: true });
 }
+
+// The packaged engine always uses build: 'never'. Don't ship the 37 MB Git
+// source archive alongside the already compiled native binding.
+await rm(join('node_modules', 'node-llama-cpp', 'llama', 'gitRelease.bundle'), { force: true });

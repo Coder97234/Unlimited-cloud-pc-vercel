@@ -8,7 +8,7 @@
     "api/chat.js": {
       "maxDuration": 120,
       "supportsCancellation": true,
-      "includeFiles": "{build/chat.mjs,build/models/*.gguf,node_modules/node-llama-cpp/**,node_modules/@node-llama-cpp/linux-x64/**}"
+      "includeFiles": "{build/chat.mjs,build/models/qwen-lite.gguf,node_modules/node-llama-cpp/**,node_modules/@node-llama-cpp/linux-x64/**}"
     }
   },
   "headers": [

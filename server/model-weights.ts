@@ -5,27 +5,19 @@ import { dirname, join } from 'node:path';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type { ReadableStream as NodeReadableStream } from 'node:stream/web';
-import type { ServerModelId } from '../shared/models.ts';
+import { DEFAULT_MODEL } from '../shared/models.ts';
 
 export type WeightSpec = { url: string; size: number; sha256: string };
 
-// Public Apache-2.0 models. Keep the exact same weights for local and hosted CPU
-// inference, and verify the pinned bytes before adding them to a deployment.
-export const MODEL_WEIGHTS = {
-  'qwen-lite': {
-    url: 'https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/9217f5db79a29953eb74d5343926648285ec7e67/qwen2.5-0.5b-instruct-q4_0.gguf',
-    size: 428_730_208,
-    sha256: '7671c0c304e6ce5a7fc577bcb12aba01e2c155cc2efd29b2213c95b18edaf6ed',
-  },
-  smollm: {
-    url: 'https://huggingface.co/bartowski/SmolLM2-360M-Instruct-GGUF/resolve/ab928a97ee49f3a015f35194879f68211291d6ca/SmolLM2-360M-Instruct-Q4_K_M.gguf',
-    size: 270_590_880,
-    sha256: '2fa3f013dcdd7b99f9b237717fa0b12d75bbb89984cc1274be1471a465bac9c2',
-  },
-} satisfies Record<ServerModelId, WeightSpec>;
+// Official Apache-2.0 Qwen 2.5 0.5B Instruct, pinned by revision and checksum.
+export const MODEL_WEIGHT = {
+  url: 'https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/9217f5db79a29953eb74d5343926648285ec7e67/qwen2.5-0.5b-instruct-q4_0.gguf',
+  size: 428_730_208,
+  sha256: '7671c0c304e6ce5a7fc577bcb12aba01e2c155cc2efd29b2213c95b18edaf6ed',
+} satisfies WeightSpec;
 
-export function packagedWeightPath(id: ServerModelId) {
-  return join(process.cwd(), 'build', 'models', `${id}.gguf`);
+export function packagedWeightPath() {
+  return join(process.cwd(), 'build', 'models', `${DEFAULT_MODEL}.gguf`);
 }
 
 export async function hasExpectedSize(path: string, spec: WeightSpec) {

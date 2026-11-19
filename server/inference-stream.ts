@@ -1,11 +1,15 @@
-import type { ChatMessage, ServerModelId } from '../shared/models.ts';
+import type { ChatMessage } from '../shared/models.ts';
+import type { WebSource } from '../shared/search.ts';
 
-export type ServerGenerate = (model: ServerModelId, messages: ChatMessage[], signal: AbortSignal, onText: (text: string) => void) => Promise<void>;
+export type Evidence = { clock?: string; sources?: WebSource[] };
+export type ServerGenerate = (messages: ChatMessage[], signal: AbortSignal, onText: (text: string) => void, evidence: Evidence) => Promise<void>;
+
+type StreamOutput = { text: (value: string) => void; sources: (value: WebSource[]) => void };
 
 // Only explicitly safe messages from our server are forwarded to the browser.
 export class InferenceError extends Error {}
 
-export function inferenceStream(generate: ServerGenerate, id: ServerModelId, messages: ChatMessage[], requestSignal: AbortSignal) {
+export function inferenceStream(work: (signal: AbortSignal, output: StreamOutput) => Promise<void>, requestSignal: AbortSignal) {
   const encoder = new TextEncoder();
   const canceled = new AbortController();
   const deadline = AbortSignal.timeout(110_000);
@@ -13,18 +17,20 @@ export function inferenceStream(generate: ServerGenerate, id: ServerModelId, mes
   return new ReadableStream<Uint8Array>({
     start(controller) {
       const emit = (value: string) => controller.enqueue(encoder.encode(value));
-      // Send headers before model startup, and keep the connection open on a cold start.
+      const send = (value: object) => emit(`data: ${JSON.stringify(value)}\n\n`);
       emit(': connected\n\n');
       const heartbeat = setInterval(() => { if (!signal.aborted) emit(': waiting\n\n'); }, 10_000);
       void (async () => {
         let hasText = false;
         try {
           signal.throwIfAborted();
-          await generate(id, messages, signal, (text) => {
-            if (!signal.aborted && text) {
+          await work(signal, {
+            text: (text) => {
+              if (signal.aborted || !text) return;
               if (text.trim()) hasText = true;
-              emit(`data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}\n\n`);
-            }
+              send({ choices: [{ delta: { content: text } }] });
+            },
+            sources: (sources) => { if (!signal.aborted) send({ sources }); },
           });
           signal.throwIfAborted();
           if (!hasText) throw new InferenceError('The model returned an empty reply. Try rephrasing your question.');
@@ -32,8 +38,8 @@ export function inferenceStream(generate: ServerGenerate, id: ServerModelId, mes
         } catch (error) {
           if (!canceled.signal.aborted && !requestSignal.aborted) {
             const message = deadline.aborted ? 'The model took too long to respond. Try a shorter prompt.'
-              : error instanceof InferenceError ? error.message : 'The server model could not respond. Try again.';
-            emit(`data: ${JSON.stringify({ error: { message } })}\n\n`);
+              : error instanceof InferenceError ? error.message : 'The server could not respond. Try again.';
+            send({ error: { message } });
           }
         } finally {
           clearInterval(heartbeat);

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { readChatEvents } from '../src/lib/stream.ts';
-import { SERVER_MODELS } from '../shared/models.ts';
+import { DEFAULT_MODEL } from '../shared/models.ts';
 
 const target = process.argv[2];
 if (!target) throw new Error('Pass the origin to smoke-test (for example, https://xyvora.net).');
@@ -8,29 +8,24 @@ const benchmark = process.argv.includes('--benchmark');
 const url = new URL('/api/chat', target);
 const status = await fetch(url, { signal: AbortSignal.timeout(10_000) });
 assert.ok(status.ok, `Chat status returned HTTP ${status.status}`);
-const configuration = await status.json();
-assert.equal(configuration.availability, 'server');
-for (const model of SERVER_MODELS) assert.ok(configuration.models.includes(model), `${model} is not enabled`);
+assert.deepEqual(await status.json(), { availability: 'server', models: [DEFAULT_MODEL], webSearch: true });
 
-const prompts = {
-  'qwen-lite': ['What is the capital of France? Answer in one short sentence.', /paris/i],
-  smollm: ['What color is a ripe banana? Answer in one short sentence.', /yellow/i],
-};
-
-async function check(model, [content, expected], label) {
+async function check(label, content, expected, { timeZone, searchQuery, source = 'server' } = {}) {
   const startedAt = performance.now();
   const response = await fetch(url, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model, messages: [{ role: 'user', content }] }),
+    body: JSON.stringify({ model: DEFAULT_MODEL, messages: [{ role: 'user', content }], timeZone, searchQuery }),
     signal: AbortSignal.timeout(125_000),
   });
-  assert.ok(response.ok, `${model} returned HTTP ${response.status}`);
+  assert.ok(response.ok, `${label} returned HTTP ${response.status}`);
   assert.match(response.headers.get('content-type') ?? '', /text\/event-stream/);
-  assert.equal(response.headers.get('x-xyvora-source'), 'server');
+  assert.equal(response.headers.get('x-xyvora-source'), source);
   let text = '';
   let chunks = 0;
   let firstText;
   let lastText;
+  let firstSource;
+  let sources = [];
   await readChatEvents(response.body, (delta) => {
     if (!delta) return;
     const now = performance.now() - startedAt;
@@ -38,19 +33,20 @@ async function check(model, [content, expected], label) {
     lastText = now;
     chunks++;
     text += delta;
-  }, true);
-  assert.ok(chunks > 1 && firstText !== undefined, `${model} did not stream multiple text chunks`);
-  assert.match(text, expected, `${model} did not return an answer to the smoke prompt`);
+  }, true, (value) => { firstSource ??= performance.now() - startedAt; sources = value; });
+  assert.ok(chunks >= (source === 'clock' ? 1 : 2) && firstText !== undefined, `${label} did not stream text`);
+  assert.match(text, expected, `${label} did not answer the smoke prompt`);
+  if (searchQuery) assert.ok(sources.some(({ url }) => /(^|\.)nasa\.gov$/.test(new URL(url).hostname)), 'No NASA source returned from the web');
+  else assert.equal(sources.length, 0);
   const ms = Math.round;
-  console.log(`XYVORA_CHAT ${label} ${model}: first text ${ms(firstText)}ms; streaming ${ms(lastText - firstText)}ms; finished ${ms(performance.now() - startedAt)}ms; ${chunks} deltas, ${text.length} chars`);
+  console.log(`XYVORA_SOLO ${label} first=${ms(firstText)}ms done=${ms(performance.now() - startedAt)}ms stream=${ms(lastText - firstText)}ms chars=${text.length} deltas=${chunks}${searchQuery ? ` sources=${sources.length} at=${ms(firstSource)}ms` : ''}`);
 }
 
-for (const label of benchmark ? ['initial', 'repeat-1', 'repeat-2'] : ['initial']) {
-  await Promise.all(SERVER_MODELS.map((model) => check(model, prompts[model], label)));
+for (let i = 0; i < (benchmark ? 5 : 1); i++) {
+  await check(`short-${i + 1}`, 'What is the capital of France? Answer in one short sentence.', /paris/i);
 }
 if (benchmark) {
-  await check('qwen-lite', [
-    'Give five practical tips for packing light for a weekend trip. Use a numbered list with one sentence per tip.',
-    /pack|wear|layer|cloth/i,
-  ], 'longer-reply');
+  await check('long', 'Give five practical tips for packing light for a weekend trip. Use a numbered list with one sentence per tip.', /pack|wear|layer|cloth/i);
 }
+await check('clock', 'What time is it?', /\d{1,2}:\d{2}.*America\/Chicago/, { timeZone: 'America/Chicago', source: 'clock' });
+await check('search', 'What is NASA’s Artemis program?', /artemis|nasa|moon/i, { searchQuery: 'NASA Artemis program Moon missions' });

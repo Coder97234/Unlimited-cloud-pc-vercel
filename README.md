@@ -1,6 +1,9 @@
 # Xyvora
 
-[Xyvora](https://xyvora.net) is a chat workspace for open-weight models, built with React and Vite for Vercel. Chat with one model or compare two on the same prompt. Replies stream from `/api/chat`; the browser just renders them. No account, WebGPU, or browser-side model download is needed.
+[Xyvora](https://xyvora.net) is a Qwen 2.5 chat workspace built with React and Vite. Replies stream from `/api/chat`; no WebGPU, browser model download, or account is needed. Earlier comparisons remain readable in local history but cannot start new replies.
+
+- **Web search:** Enable the **Web search** chip for one prompt, or type `/search` followed by your query. Qwen answers using retrieved excerpts and shows the original source links. Keenable's [public search API](https://docs.keenable.ai/api-reference/search#without-a-key) is keyless and rate-limited. A lookup that fails is not presented as a sourced answer.
+- **Time and date:** Ask “What time is it?”, “What is today’s date?”, or “What time is it in Tokyo?” The server clock answers directly without running the model. Local questions use the browser's IANA time zone; API requests without one use UTC.
 
 ## Run locally
 
@@ -9,29 +12,26 @@ npm ci --ignore-scripts
 npm run dev
 ```
 
-By default, the local dev server shows clearly labeled sample replies. Set `XYVORA_SERVER_MODELS=1` in `.env.local` (see `.env.example`) to use real server inference locally. That needs a supported `node-llama-cpp` CPU binding. Run `npm run build:models` to prepare the pinned weights in advance, or let the first local request download them from Hugging Face. A local `AI_GATEWAY_API_KEY` enables real Gateway models instead of samples.
+The local interface preview uses labeled sample replies and a real clock. Set `XYVORA_SERVER_MODELS=1` in `.env.local` for live Qwen inference and Web search. This needs a supported `node-llama-cpp` CPU binding and outbound access to the model/search hosts. Run `npm run build:models` to stage the pinned weights before the first request, or let the first local live request download them.
 
 ## Deploy to Vercel
 
-Use the **xyvora-ai** project with **xyvora.net** as its production domain. The Vite build, Node function, and CPU-only Vercel install are configured in `vercel.json`. Leave existing DNS in place when it is verified.
+Use the **xyvora-ai** project with **xyvora.net** as its production domain. `vercel.json` configures the Vite build, the Node function, and the CPU-only install. No Gateway credentials or other models are used.
 
-- **Qwen 2.5 Lite** (Qwen 2.5 0.5B Instruct) and **SmolLM2 360M Instruct** run on the Vercel function CPU with llama.cpp. Both models are Apache-2.0. The Vercel build downloads and verifies the pinned weights and includes them only in the function bundle. The function loads the model from disk and reuses it on a warm instance; it does not fetch the weights when a visitor sends a message. The weights are not in Git or the browser bundle.
-- The model files exceed Vercel’s standard function size limit. This deployment uses [Large Functions](https://vercel.com/docs/functions/limitations#large-functions) with Fluid compute and Active CPU. On older projects, set `VERCEL_SUPPORT_LARGE_FUNCTIONS=1` before deploying. `npm run build` still works offline; `npm run build:models` stages the model files separately.
-- These are lightweight models for short prompts, not the same models as ChatGPT. Output length and context are limited to keep server CPU usage bounded. Compare streams independent replies from both models.
-- **Optional larger models:** after [verifying and enabling AI Gateway](https://vercel.com/docs/ai-gateway/authentication-and-byok) and setting a budget, set `XYVORA_ENABLE_GATEWAY=1` and redeploy. The function can use the request-scoped Vercel OIDC token or a server-side `AI_GATEWAY_API_KEY`. These models are not required for chat or Compare.
-- Vercel compute and transfer quotas still apply without Gateway. The API limits input, output, and per-instance traffic. Configure project spend/usage controls and shared rate limiting before operating at public scale.
+- The build downloads and verifies the official Apache-2.0 [Qwen 2.5 0.5B Instruct](https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF) weights. Only the Qwen file ships with the server, not with the client or in Git. The function maps the weights locally and reuses its native inference context after clearing tokens between requests.
+- The artifact exceeds the standard bundle limit; use [Large Functions](https://vercel.com/docs/functions/limitations#large-functions) with Fluid compute and Active CPU. Older projects may need `VERCEL_SUPPORT_LARGE_FUNCTIONS=1`. `npm run build` works without downloading the weights; `npm run build:models` stages them separately.
+- Vercel compute/transfer limits and the search provider's rate limits still apply. The API limits requests, lookup duration, context, and output. Use project spend controls and shared rate limits before operating at public scale.
 
 ## Privacy
 
-Chat history is stored in the current browser. To answer, the Xyvora function receives the prompt, a limited amount of recent conversation, and any attached text. It does not persist messages. If a Gateway model is selected, that context is also sent to Vercel AI Gateway and the model provider. Earlier browser-generated replies remain visible locally and are not automatically included as server context.
+Chat history stays in the browser. The server receives the prompt, limited recent context, any attached text, and the browser time zone to answer a chat request; it does not persist the chat. Only an explicitly requested search sends its query to Keenable, not history or attachments. [The search provider logs queries](https://docs.keenable.ai/api-reference#limits-and-billing); do not include private information in a search.
 
 ## Checks
 
 ```sh
 npm test
 npm run build
-# Verify real replies from both deployed models (not an availability check):
-node --disable-warning=ExperimentalWarning --experimental-strip-types scripts/smoke-chat.mjs https://xyvora.net
+node --experimental-strip-types scripts/smoke-chat.mjs https://xyvora.net --benchmark
 ```
 
-Append `--benchmark` to repeat the two-model check and time a longer Qwen reply. The script reports time to the first visible text separately from streaming and total completion time.
+The public smoke test verifies real Qwen streams, live clock output, and external sources. `--benchmark` repeats short prompts and times a longer reply, separating first visible text from completion.
