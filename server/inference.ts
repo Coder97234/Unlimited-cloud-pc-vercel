@@ -1,87 +1,60 @@
-import { createHash } from 'node:crypto';
-import { createWriteStream } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Readable, Transform } from 'node:stream';
-import { pipeline } from 'node:stream/promises';
-import type { ReadableStream as NodeReadableStream } from 'node:stream/web';
 import type { ChatHistoryItem, Llama, LlamaModel } from 'node-llama-cpp';
 import { SYSTEM_PROMPT } from '../shared/models.ts';
 import type { ChatMessage, ServerModelId } from '../shared/models.ts';
 import { InferenceError } from './inference-stream.ts';
-
-// Public Apache-2.0 chat models. Only the function fetches these weights. Pin the
-// revision, exact size and SHA-256 before opening the files with the native reader.
-const weights = {
-  'qwen-lite': {
-    url: 'https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/9217f5db79a29953eb74d5343926648285ec7e67/qwen2.5-0.5b-instruct-q4_0.gguf',
-    size: 428_730_208,
-    sha256: '7671c0c304e6ce5a7fc577bcb12aba01e2c155cc2efd29b2213c95b18edaf6ed',
-  },
-  smollm: {
-    url: 'https://huggingface.co/bartowski/SmolLM2-360M-Instruct-GGUF/resolve/ab928a97ee49f3a015f35194879f68211291d6ca/SmolLM2-360M-Instruct-Q4_K_M.gguf',
-    size: 270_590_880,
-    sha256: '2fa3f013dcdd7b99f9b237717fa0b12d75bbb89984cc1274be1471a465bac9c2',
-  },
-} satisfies Record<ServerModelId, { url: string; size: number; sha256: string }>;
+import { hasExpectedSize, MODEL_WEIGHTS, packagedWeightPath, prepareWeights } from './model-weights.ts';
 
 const CONTEXT_TOKENS = 3_072;
 const REPLY_TOKENS = 384;
 const cache = new Map<ServerModelId, Promise<LlamaModel>>();
 let llama: Promise<Llama> | undefined;
-let loading: Promise<unknown> = Promise.resolve();
+let downloadQueue: Promise<unknown> = Promise.resolve();
 const active = new Set<ServerModelId>();
 
-async function downloadWeights(id: ServerModelId, path: string, signal: AbortSignal) {
-  const preset = weights[id];
-  const response = await fetch(preset.url, { signal });
-  if (!response.ok || !response.body) {
-    await response.body?.cancel().catch(() => undefined);
-    throw new Error(`Weights download returned HTTP ${response.status}`);
-  }
-  let size = 0;
-  const hash = createHash('sha256');
-  const verify = new Transform({ transform(chunk: Buffer, _encoding, done) {
-    size += chunk.length;
-    if (size > preset.size) { done(new Error('Unexpected weights size')); return; }
-    hash.update(chunk);
-    done(null, chunk);
-  } });
-  await pipeline(Readable.fromWeb(response.body as NodeReadableStream<Uint8Array>), verify, createWriteStream(path, { flags: 'wx' }), { signal });
-  if (size !== preset.size || hash.digest('hex') !== preset.sha256) throw new Error('Weights do not match the pinned checksum');
+function loadDevelopmentModel(backend: Llama, id: ServerModelId, signal: AbortSignal) {
+  // Limit scratch usage in unbundled development. Packaged models never use
+  // this queue, so a cold Compare can open both weight files independently.
+  const pending = downloadQueue.then(async () => {
+    signal.throwIfAborted();
+    const directory = await mkdtemp(join(tmpdir(), 'xyvora-'));
+    try {
+      const path = join(directory, 'model.gguf');
+      await prepareWeights(MODEL_WEIGHTS[id], path, AbortSignal.any([signal, AbortSignal.timeout(45_000)]));
+      return await backend.loadModel({ modelPath: path, gpuLayers: 0, useMmap: false, loadSignal: signal });
+    } finally { await rm(directory, { recursive: true, force: true }); }
+  });
+  downloadQueue = pending.catch(() => undefined);
+  return pending;
 }
 
 function loadModel(id: ServerModelId, signal: AbortSignal): Promise<LlamaModel> {
   const existing = cache.get(id);
   if (existing) return existing;
-  // Vercel scratch space fits either file, not both. Load one at a time into
-  // memory without mmap, delete its download, and reuse the warm model.
-  const pending = loading.then(async () => {
+  const pending = (async () => {
     signal.throwIfAborted();
-    let stage = 'runtime';
-    let directory: string | undefined;
-    try {
-      const { getLlama, LlamaLogLevel } = await import('node-llama-cpp');
-      const backend = await (llama ??= getLlama({ gpu: false, build: 'never', maxThreads: 1, logLevel: LlamaLogLevel.error })
-        .catch((error: unknown) => { llama = undefined; throw error; }));
-      stage = 'download';
-      directory = await mkdtemp(join(tmpdir(), 'xyvora-'));
-      const path = join(directory, 'model.gguf');
-      await downloadWeights(id, path, AbortSignal.any([signal, AbortSignal.timeout(45_000)]));
-      stage = 'weights';
-      return await backend.loadModel({ modelPath: path, gpuLayers: 0, useMmap: false, loadSignal: signal });
-    } catch (error) {
-      if (signal.aborted) throw error;
-      // No prompts or credentials are used during initialization.
-      console.error(`[xyvora] Could not initialize ${id} (${stage})`, error instanceof Error ? error.message : 'Unknown error');
-      throw new InferenceError('The server could not start this model. Try again or choose another model.');
-    } finally {
-      if (directory) await rm(directory, { recursive: true, force: true });
+    const path = packagedWeightPath(id);
+    const packaged = await hasExpectedSize(path, MODEL_WEIGHTS[id]);
+    if (!packaged && process.env.VERCEL === '1') {
+      throw new Error('The function bundle is missing a verified model file');
     }
-  }).catch((error: unknown) => { cache.delete(id); throw error; });
+    const { getLlama, LlamaLogLevel } = await import('node-llama-cpp');
+    const backend = await (llama ??= getLlama({ gpu: false, build: 'never', maxThreads: 1, logLevel: LlamaLogLevel.error })
+      .catch((error: unknown) => { llama = undefined; throw error; }));
+    signal.throwIfAborted();
+    return packaged
+      ? await backend.loadModel({ modelPath: path, gpuLayers: 0, useMmap: true, loadSignal: signal })
+      : await loadDevelopmentModel(backend, id, signal);
+  })().catch((error: unknown) => {
+    cache.delete(id);
+    if (signal.aborted) throw error;
+    // Model initialization does not use prompts or credentials.
+    console.error(`[xyvora] Could not initialize ${id}`, error instanceof Error ? error.message : 'Unknown error');
+    throw new InferenceError('The server could not start this model. Try again or choose another model.');
+  });
   cache.set(id, pending);
-  loading = pending.catch(() => undefined);
   return pending;
 }
 

@@ -53,7 +53,11 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   return {
     plugins: [react(), chatInDevelopment(env.AI_GATEWAY_API_KEY, env.XYVORA_SERVER_MODELS === '1')],
-    server: { host: '0.0.0.0', allowedHosts: ['.e2b.app'] },
+    server: {
+      host: '0.0.0.0',
+      allowedHosts: ['.e2b.app'],
+      fs: { deny: ['.env', '.env.*', '*.{crt,pem,key,p12,pfx,cer,der}', '.npmrc', '.yarnrc.yml', '**/.git/**', '**/*.gguf'] },
+    },
     preview: { host: '0.0.0.0', allowedHosts: ['.e2b.app'] },
   };
 });
