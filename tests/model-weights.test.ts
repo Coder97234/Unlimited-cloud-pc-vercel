@@ -51,7 +51,7 @@ test('cleans up partial weights when a download is canceled', async (t) => {
   t.after(() => rm(directory, { recursive: true, force: true }));
   const path = join(directory, 'model.gguf');
   const cancel = new AbortController();
-  let open;
+  let open: (() => void) | undefined;
   const started = new Promise<void>((resolve) => { open = resolve; });
   const pending = prepareWeights(spec, path, cancel.signal, async () => new Response(new ReadableStream({
     start(controller) {
