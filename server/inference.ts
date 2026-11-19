@@ -6,6 +6,7 @@ import { SYSTEM_PROMPT } from '../shared/models.ts';
 import { InferenceError } from './inference-stream.ts';
 import type { ServerGenerate } from './inference-stream.ts';
 import { hasExpectedSize, MODEL_WEIGHT, packagedWeightPath, prepareWeights } from './model-weights.ts';
+import { planBundledQwenMemory } from './qwen-memory.ts';
 
 const CONTEXT_TOKENS = 3_072;
 const REPLY_TOKENS = 384;
@@ -41,7 +42,12 @@ async function loadEngine(signal: AbortSignal): Promise<Engine> {
     const packaged = await hasExpectedSize(path, MODEL_WEIGHT);
     if (!packaged && process.env.VERCEL === '1') throw new Error('The function bundle is missing the verified Qwen model');
     const [native, threads] = await Promise.all([import('node-llama-cpp'), cpuThreads()]);
-    backend ??= await native.getLlama({ gpu: false, build: 'never', skipDownload: true, maxThreads: threads, logLevel: native.LlamaLogLevel.error });
+    if (!backend) {
+      backend = await native.getLlama({ gpu: false, build: 'never', skipDownload: true, maxThreads: threads, logLevel: native.LlamaLogLevel.error });
+      if (packaged && process.env.VERCEL === '1' && process.env.XYVORA_QWEN_MEMORY_SIMULATION !== '1') {
+        await planBundledQwenMemory(native, backend, path);
+      }
+    }
     signal.throwIfAborted();
     const model = packaged
       ? await backend.loadModel({ modelPath: path, gpuLayers: 0, useMmap: true, loadSignal: signal })
