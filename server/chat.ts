@@ -3,7 +3,7 @@ import type { Availability, ChatMessage, ReplySource, TextAttachment } from '../
 import { allowsSearchToggle, explicitSearchQuery, MAX_SEARCH_QUERY } from '../shared/search.ts';
 import { SKILL_IDS, skillAvailable } from '../shared/skill-catalog.ts';
 import type { SkillResultId } from '../shared/skill-catalog.ts';
-import { runInstantSkill, workflowPrompt } from '../shared/skills.ts';
+import { modelMessage, runInstantSkill } from '../shared/skills.ts';
 import { clockReply, contextualClock, validTimeZone } from './clock.ts';
 import { inferenceStream } from './inference-stream.ts';
 import type { ServerGenerate } from './inference-stream.ts';
@@ -161,7 +161,7 @@ export async function handleChat(request: Request, options: ChatOptions = {}): P
     if (clock) return instantReply(clock, 'clock', 'time');
   }
 
-  const modelPrompt = withAttachment(input.query ? prompt : workflowPrompt(prompt), input.attachment);
+  const modelPrompt = input.query ? withAttachment(prompt, input.attachment) : modelMessage(prompt, input.attachment);
   const messages = input.messages;
   if (modelPrompt !== prompt) {
     const historyLength = messages.slice(0, -1).reduce((sum, message) => sum + message.content.length, 0);

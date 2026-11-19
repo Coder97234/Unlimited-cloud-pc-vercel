@@ -4,7 +4,7 @@ import { MAX_SEARCH_QUERY, normalizeSources } from '../../shared/search.ts';
 import type { WebSource } from '../../shared/search.ts';
 import { isSkillResultId } from '../../shared/skill-catalog.ts';
 import type { SkillResultId } from '../../shared/skill-catalog.ts';
-import { workflowPrompt } from '../../shared/skills.ts';
+import { modelMessage } from '../../shared/skills.ts';
 
 // These names are retained for the local archive only. The API accepts Qwen 2.5.
 export const SAVED_MODEL_NAMES = {
@@ -81,7 +81,7 @@ export function buildMessages(previous: Turn[], current: Pick<Turn, 'prompt' | '
   // Current attachments are sent separately so the server routes on the prompt,
   // not on text that happened to be inside an uploaded file.
   const messages: ChatMessage[] = [{ role: 'user', content: current.prompt }];
-  let length = withAttachment(workflowPrompt(current.prompt), current.attachment).length;
+  let length = modelMessage(current.prompt, current.attachment).length;
   for (const turn of previous.slice(-9).reverse()) {
     const answer = turn.answers[0];
     if (!answer || answer.model !== DEFAULT_MODEL || answer.source === 'preview' || answer.source === 'legacy' || answer.source === 'skill' || !answer.content.trim() || answer.state !== 'finished') continue;

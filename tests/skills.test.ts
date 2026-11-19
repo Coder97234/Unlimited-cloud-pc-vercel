@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { DEFAULT_MODEL, MAX_ATTACHMENT, SYSTEM_PROMPT, XYVORA_NAME, XYVORA_SITE } from '../shared/models.ts';
 import { chatSearchQuery } from '../shared/search.ts';
 import { isSkillId, SKILL_IDS, SKILLS } from '../shared/skill-catalog.ts';
-import { runInstantSkill, workflowPrompt } from '../shared/skills.ts';
+import { modelMessage, runInstantSkill } from '../shared/skills.ts';
 import { handleChat } from '../server/chat.ts';
 import { conversationMarkdown } from '../src/lib/export-chat.ts';
 import { buildMessages, loadThreads } from '../src/lib/history.ts';
@@ -142,8 +142,10 @@ test('workflow commands pass one task and its material to Qwen; missing input ge
   assert.match((await read(response)).text, /Ava/);
   assert.match(result('/translate'), /target language/);
   assert.match(result('/summarize'), /Paste material/);
-  assert.match(workflowPrompt('/translate French: hello'), /Translate.*French: hello/s);
-  assert.equal(workflowPrompt('Normal chat'), 'Normal chat');
+  assert.match(result('/translate Spanish'), /target language/);
+  assert.match(modelMessage('/translate French: hello'), /Translate.*into French.*\n\nhello$/s);
+  assert.match(modelMessage('/translate French', { name: 'hello.txt', text: 'hello' }), /into French.*\n\nhello$/s);
+  assert.equal(modelMessage('Normal chat'), 'Normal chat');
 });
 
 test('skill history keeps its attribution, skips private data in follow-up chat, and can be exported', (t) => {

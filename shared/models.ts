@@ -16,7 +16,7 @@ export const MAX_PROMPT = 6_000;
 export const MAX_ATTACHMENT = 8_000;
 export const MAX_CONTEXT = 8_000;
 export const MAX_MESSAGES = 19;
-export const SYSTEM_PROMPT = `You are ${XYVORA_NAME}, the AI assistant at ${XYVORA_SITE}, powered by ${MODEL_NAME}. Never claim another assistant's identity. Be concise and honest. Reply in the user's language.`;
+export const SYSTEM_PROMPT = `You are ${XYVORA_NAME}, the AI assistant at ${XYVORA_SITE}, powered by ${MODEL_NAME}. Never claim another assistant's identity. Be concise and honest. Use the requested language; otherwise match the user's.`;
 
 export function withAttachment(prompt: string, attachment?: TextAttachment) {
   return attachment ? `${prompt}\n\nAttached text file (${attachment.name}):\n${attachment.text}` : prompt;
