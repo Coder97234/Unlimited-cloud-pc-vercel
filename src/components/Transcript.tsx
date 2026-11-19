@@ -1,10 +1,11 @@
 import { AlertCircle, ArrowUpRight, Check, Clipboard, Clock3, Globe, Paperclip, RotateCcw, Zap } from 'lucide-react';
-import { lazy, memo, Suspense, useState } from 'react';
+import { lazy, memo, Suspense, useEffect, useRef, useState } from 'react';
 import { XYVORA_NAME } from '../../shared/models.ts';
 import { skillName } from '../../shared/skill-catalog.ts';
 import { SAVED_MODEL_NAMES } from '../lib/history.ts';
 import type { Answer, Thread } from '../lib/history.ts';
-import { Mark, ModelIcon } from './Brand.tsx';
+import { hasCompletedWord, hopMascot } from '../lib/mascot-motion.ts';
+import { Mascot, ModelIcon } from './Brand.tsx';
 
 function PlainAnswer({ content }: { content: string }) {
   return <div className="markdown plain-answer">{content}</div>;
@@ -31,10 +32,21 @@ function AnswerCard({ answer, archived, searching, onRetry, onAlert }: {
   const badge = clock ? 'Live clock' : instant ? (answer.skill ? skillName(answer.skill) : 'Built-in skill') : historical ? undefined : SAVED_MODEL_NAMES[answer.model];
   const sources = answer.sources ?? [];
   const working = answer.state === 'working';
+  const mascot = useRef<HTMLSpanElement>(null);
+  const seen = useRef({ working: false, length: 0 });
+  const { content, state } = answer;
+  useEffect(() => {
+    const previous = seen.current;
+    seen.current = { working, length: content.length };
+    const justFinished = previous.working && state === 'finished';
+    if (!mascot.current || (!working && !justFinished)) return;
+    const from = previous.working && previous.length <= content.length ? previous.length : 0;
+    if (hasCompletedWord(content, from, justFinished)) hopMascot(mascot.current);
+  }, [content, state, working]);
   return <article className="answer-card" aria-label={`${clock || instant ? badge : name} response`}>
     <header className="answer-heading">
       {clock ? <span className="model-icon tint-sky"><Clock3 size={17} /></span> : instant ? <span className="model-icon tint-violet"><Zap size={17} /></span>
-        : historical ? <ModelIcon id={answer.model} /> : <Mark className="reply-mark" />}
+        : historical ? <ModelIcon id={answer.model} /> : <Mascot className="reply-mark" motionRef={mascot} />}
       <strong>{name}</strong>{badge && <span className="answer-tag">{badge}</span>}
       {answer.source === 'preview' && <span className="answer-tag">Sample</span>}
       {answer.source === 'legacy' && <span className="answer-tag">Earlier reply</span>}

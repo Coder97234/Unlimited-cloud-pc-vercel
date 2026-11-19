@@ -2,6 +2,8 @@
 
 [Xyvora AI](https://xyvora.net) is the assistant at **xyvora.net**, powered by **Qwen 2.5**. Ask “Who are you?” or type `/about` for its name, website, and model. No account, browser model download, or WebGPU is needed. Earlier comparisons remain readable in local history.
 
+The welcome screen and favicon use the supplied Xyvora artwork. The frog beside the composer and Qwen replies blinks and hops on completed words without buffering the text or moving the layout. Fast words share a hop; with reduced motion enabled, the frog stays still.
+
 ## Skills
 
 Open **Skills** (or `Ctrl`/`⌘` + `/`) and select a card to load an editable example. Type `/skills` to see the command list in chat, or try one of these:
@@ -88,3 +90,18 @@ Live comparison on `xyvora.net`, five identical short prompts (31 characters and
 These small regional samples include mixed startup states. They show a faster tool path and a smaller initial app payload, **not** faster general Qwen inference. The packing-list prompt completed in 7.94 s instead of 12.95 s, but it generated 159 instead of 217 deltas. Cold starts remain the main latency cost. The live API calculator completed in 65 ms; in the 390 px Chromium test the on-device calculator took 5.3 ms median to show text and made no chat POSTs.
 
 The pre-change regional benchmark used `dpl_PhDeuhTeV2MrADmj6jeFubVzVqaQ`. The live checks used `dpl_GSiiMHSZbf6FL1WX4DAwvD1dR7MU` against `dpl_8DCGNM1TF1eyAvCqwQXnL1VVWN1c` on the apex domain. Mobile checks covered the Skills picker, Xyvora identity link, private tool-history exclusion, clock, and a real Qwen translation. The HTTP smoke test also verified source retrieval and rejected the retired model ID.
+
+### Qwen startup and mascot release
+
+The pinned CPU backend normally runs temporary native allocations to estimate model and context memory. For the verified, bundled Qwen file and this exact CPU configuration, Xyvora uses conservative memory estimates and keeps the backend's RAM checks and allocation tracking. Other configurations fall back to the native estimation path. Set `XYVORA_QWEN_MEMORY_SIMULATION=1` to use native estimation for this bundle too.
+
+In a controlled Vercel **builder** test (`dpl_FFRnQPYXwKLVjSbywRpLsTHefinq`), three alternating pairs of fresh two-thread processes mapped the same weights with a shared OS file cache:
+
+| Median | Native simulation | Planned memory |
+| --- | ---: | ---: |
+| First text after process startup | 2,819 ms | 2,068 ms |
+| Short reply finished | 3,069 ms | 2,312 ms |
+| Peak RSS | 881 MiB | 812 MiB |
+| Long decode | 28 tokens/s | 28 tokens/s |
+
+In all pairs, greedy reply hashes and token counts matched. The gain is in startup, not sustained generation. Reproduce the comparison after staging the pinned weights with `node --experimental-strip-types scripts/bench-qwen.mjs --threads=2 --samples=3`. These process timings exclude HTTP and are separate from the live measurements.

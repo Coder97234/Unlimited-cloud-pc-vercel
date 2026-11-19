@@ -1,10 +1,10 @@
 import {
-  Clock3, Columns2, FolderOpen, Globe, MessageSquare, PanelLeftClose, Plus, Search, Settings2, Trash2, Zap,
+  Clock3, Columns2, FolderOpen, Globe, MessageSquare, PanelLeftClose, Plus, Search, Settings2, Trash2, UserRound, Zap,
 } from 'lucide-react';
 import { MODEL_NAME, XYVORA_NAME } from '../../shared/models.ts';
 import type { Availability } from '../../shared/models.ts';
 import type { Thread } from '../lib/history.ts';
-import { Mark } from './Brand.tsx';
+import { Mascot } from './Brand.tsx';
 
 export function Sidebar({ threads, activeId, availability, onNew, onSearch, onSkills, onWebSearch, onClock, onSettings, onCollapse, onThread, onDelete, onAbout }: {
   threads: Thread[]; activeId: string | null; availability: Availability | 'loading';
@@ -16,7 +16,7 @@ export function Sidebar({ threads, activeId, availability, onNew, onSearch, onSk
   return <aside className="sidebar" id="workspace-sidebar" aria-label="Workspace sidebar">
     <div className="sidebar-top">
       <button type="button" className="wordmark" onClick={onNew} aria-label={`${XYVORA_NAME} home`}>
-        <Mark /><span>{XYVORA_NAME}<span className="wordmark-period">.</span></span>
+        <Mascot /><span>{XYVORA_NAME}<span className="wordmark-period">.</span></span>
       </button>
       <button type="button" className="icon-button sidebar-toggle" aria-label="Close sidebar" title="Close sidebar" onClick={onCollapse}><PanelLeftClose size={18} /></button>
     </div>
@@ -49,7 +49,7 @@ export function Sidebar({ threads, activeId, availability, onNew, onSearch, onSk
         {availability === 'preview' ? 'Preview mode' : availability === 'unavailable' ? 'Chat connection unavailable' : availability === 'loading' ? 'Connecting to chat…' : `Powered by ${MODEL_NAME}`}
       </button>
       <button type="button" className="workspace-settings" onClick={onSettings} aria-label="Workspace settings">
-        <span className="workspace-avatar" aria-hidden="true">X</span>
+        <span className="workspace-avatar" aria-hidden="true"><UserRound size={16} /></span>
         <span className="workspace-profile"><strong>Personal workspace</strong><small>History on this device</small></span>
         <Settings2 size={16} className="settings-icon" />
       </button>

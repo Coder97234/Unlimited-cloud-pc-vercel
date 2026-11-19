@@ -4,7 +4,8 @@ import type { ChangeEvent, RefObject } from 'react';
 import { DEFAULT_MODEL, MAX_ATTACHMENT, MAX_PROMPT, MODEL_NAME } from '../../shared/models.ts';
 import { allowsSearchToggle, chatSearchQuery, explicitSearchQuery, MAX_SEARCH_QUERY } from '../../shared/search.ts';
 import type { Attachment } from '../lib/history.ts';
-import { ModelIcon } from './Brand.tsx';
+import { hopMascot, typedCompletedWord } from '../lib/mascot-motion.ts';
+import { Mascot, ModelIcon } from './Brand.tsx';
 
 type Props = {
   draft: string;
@@ -28,6 +29,8 @@ export function Composer({ draft, onDraft, textarea, attachment, onAttachment, o
   const searchTooLong = query !== undefined && query.length > MAX_SEARCH_QUERY;
   const canSend = !!draft.trim() && !searchTooLong && (query === undefined || !!query.trim());
   const fileInput = useRef<HTMLInputElement>(null);
+  const mascot = useRef<HTMLSpanElement>(null);
+  const beforeComposition = useRef<string | null>(null);
   useLayoutEffect(() => {
     const field = textarea.current;
     if (field) { field.style.height = 'auto'; field.style.height = `${Math.min(field.scrollHeight, 154)}px`; }
@@ -57,17 +60,34 @@ export function Composer({ draft, onDraft, textarea, attachment, onAttachment, o
       <Paperclip size={14} /><span>{attachment.name}</span>
       <button type="button" className="bare-icon" onClick={() => onAttachment(undefined)} aria-label="Remove attachment"><X size={14} /></button>
     </div>}
-    <textarea
-      ref={textarea} value={draft} maxLength={MAX_PROMPT} onChange={(event) => onDraft(event.target.value)} rows={2}
-      placeholder={webSearch ? 'What should I look up?…' : 'Ask Xyvora AI anything…'} aria-label="Message Xyvora"
-      aria-describedby={query !== undefined && canSearch ? 'search-disclosure' : undefined}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
-          event.preventDefault();
-          if (!busy && canSend) onSend();
-        }
-      }}
-    />
+    <div className="composer-input-row">
+      <Mascot className="composer-mark" motionRef={mascot} />
+      <textarea
+        ref={textarea} value={draft} maxLength={MAX_PROMPT} rows={2}
+        placeholder={webSearch ? 'What should I look up?…' : 'Ask Xyvora AI anything…'} aria-label="Message Xyvora"
+        aria-describedby={query !== undefined && canSearch ? 'search-disclosure' : undefined}
+        onChange={(event) => {
+          const field = event.currentTarget;
+          const input = event.nativeEvent as InputEvent;
+          if (beforeComposition.current === null && !input.isComposing && !input.inputType?.startsWith('delete')
+            && typedCompletedWord(draft, field.value, field.selectionStart)) hopMascot(mascot.current);
+          onDraft(field.value);
+        }}
+        onCompositionStart={() => { beforeComposition.current = draft; }}
+        onCompositionEnd={({ currentTarget: field }) => {
+          const before = beforeComposition.current;
+          beforeComposition.current = null;
+          if (before !== null && typedCompletedWord(before, field.value, field.selectionStart, true)) hopMascot(mascot.current);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+            event.preventDefault();
+            if (!busy && canSend) onSend();
+          }
+        }}
+      />
+    </div>
+    {draft.length > MAX_PROMPT - 400 && <span className="char-count">{draft.length}/{MAX_PROMPT}</span>}
     <div className="composer-toolbar">
       <div className="composer-tools">
         <input type="file" ref={fileInput} hidden accept=".txt,.md,.csv,.json,.js,.ts,.py" onChange={(event) => void attach(event)} />
@@ -79,7 +99,6 @@ export function Composer({ draft, onDraft, textarea, attachment, onAttachment, o
         </button>
       </div>
       <div className="composer-actions">
-        {draft.length > MAX_PROMPT - 400 && <span className="char-count">{draft.length}/{MAX_PROMPT}</span>}
         {busy
           ? <button type="button" className="send-button" title="Stop response" aria-label="Stop response" onClick={onStop}><Square size={14} fill="currentColor" /></button>
           : <button type="submit" className="send-button" title="Send message" aria-label="Send message" disabled={!canSend}><ArrowUp size={21} strokeWidth={2.3} /></button>}

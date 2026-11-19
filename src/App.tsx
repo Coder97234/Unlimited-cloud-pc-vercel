@@ -6,7 +6,7 @@ import { allowsSearchToggle, chatSearchQuery, MAX_SEARCH_QUERY } from '../shared
 import { SKILLS } from '../shared/skill-catalog.ts';
 import type { SkillId } from '../shared/skill-catalog.ts';
 import { runInstantSkill } from '../shared/skills.ts';
-import { HeroMark } from './components/Brand.tsx';
+import { BrandLockup } from './components/Brand.tsx';
 import { Composer } from './components/Composer.tsx';
 import { Dialog } from './components/Dialog.tsx';
 import { Sidebar } from './components/Sidebar.tsx';
@@ -253,7 +253,7 @@ export default function App() {
       </> : <div className="welcome-scroll">
         <div className="welcome">
           <div className="welcome-heading">
-            <HeroMark />
+            <BrandLockup dark={theme === 'dark'} />
             <span className="workspace-kicker"><Sparkles size={13} strokeWidth={2.1} /> POWERED BY {MODEL_NAME.toUpperCase()}</span>
             <h1>What’s on your mind<span>?</span></h1><p>Meet <strong>{XYVORA_NAME}</strong>, your assistant on <strong>{XYVORA_SITE}</strong>. Ask a question or try a skill.</p>
           </div>
