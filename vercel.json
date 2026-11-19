@@ -1,9 +1,15 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "vite",
+  "installCommand": "npm ci --ignore-scripts --no-audit --no-fund && node scripts/vercel-cpu.mjs",
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
-  "functions": { "api/chat.ts": { "maxDuration": 60 } },
+  "functions": {
+    "api/chat.ts": {
+      "maxDuration": 120,
+      "includeFiles": "{node_modules/node-llama-cpp/**,node_modules/@node-llama-cpp/linux-x64/**}"
+    }
+  },
   "headers": [
     {
       "source": "/(.*)",

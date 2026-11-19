@@ -1,14 +1,9 @@
-import type { ChatMessage, HostedModelId } from '../../shared/models.ts';
+import { REPLY_SOURCE_HEADER } from '../../shared/models.ts';
+import type { ChatMessage, ModelId, ReplySource } from '../../shared/models.ts';
 
-export class ChatError extends Error {
-  readonly canUseDevice: boolean;
-  constructor(message: string, canUseDevice = false) {
-    super(message);
-    this.canUseDevice = canUseDevice;
-  }
-}
+export class ChatError extends Error {}
 
-export async function readChatEvents(body: ReadableStream<Uint8Array>, onText: (delta: string) => void) {
+export async function readChatEvents(body: ReadableStream<Uint8Array>, onText: (delta: string) => void, showServerError = false) {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
@@ -22,7 +17,10 @@ export async function readChatEvents(body: ReadableStream<Uint8Array>, onText: (
     try { payload = JSON.parse(data); }
     catch { throw new ChatError('The model sent an unreadable response. Try again.'); }
     const choice = payload?.choices?.[0];
-    if (payload?.error || choice?.finish_reason === 'error') throw new ChatError('The model hit an error while responding. Try again.');
+    if (payload?.error || choice?.finish_reason === 'error') {
+      const message = (payload?.error as { message?: unknown } | undefined)?.message;
+      throw new ChatError(showServerError && typeof message === 'string' ? message : 'The model hit an error while responding. Try again.');
+    }
     if (choice?.finish_reason) finish = true;
     if (typeof choice?.delta?.content === 'string') onText(choice.delta.content);
   };
@@ -45,14 +43,19 @@ export async function readChatEvents(body: ReadableStream<Uint8Array>, onText: (
   }
 }
 
-export async function streamHosted(model: HostedModelId, messages: ChatMessage[], signal: AbortSignal, onText: (delta: string) => void) {
+export async function streamChat(
+  model: ModelId, messages: ChatMessage[], signal: AbortSignal,
+  onText: (delta: string) => void, onSource: (source: ReplySource) => void,
+) {
   const response = await fetch('/api/chat', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ model, messages }), signal,
   });
-  if (!response.ok || !response.body) {
+  if (!response.ok || !response.body || !response.headers.get('content-type')?.includes('text/event-stream')) {
     const data = await response.json().catch(() => null);
-    throw new ChatError(typeof data?.error === 'string' ? data.error : 'The chat server could not respond. Try again.', data?.code === 'HOSTED_UNAVAILABLE');
+    throw new ChatError(typeof data?.error === 'string' ? data.error : 'The chat server could not respond. Try again.');
   }
-  await readChatEvents(response.body, onText);
+  const source = response.headers.get(REPLY_SOURCE_HEADER);
+  if (source === 'server' || source === 'hosted' || source === 'preview') onSource(source);
+  await readChatEvents(response.body, onText, source === 'server');
 }

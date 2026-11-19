@@ -45,7 +45,7 @@ export function Sidebar({ threads, activeId, view, availability, onNew, onView, 
     <div className="sidebar-bottom">
       <button type="button" className="sidebar-status" onClick={onAbout}>
         <span className={`status-dot status-${availability}`} />
-        {availability === 'preview' ? 'Preview mode' : availability === 'on-device' ? 'On-device mode' : 'Open-model workspace'}
+        {availability === 'preview' ? 'Preview mode' : availability === 'unavailable' ? 'Chat connection unavailable' : 'Open-model workspace'}
       </button>
       <button type="button" className="workspace-settings" onClick={onSettings} aria-label="Workspace settings">
         <span className="workspace-avatar" aria-hidden="true">X</span>

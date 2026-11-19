@@ -1,30 +1,34 @@
 # Xyvora
 
-Xyvora is a chat workspace for open-weight language models, built with React and Vite for deployment on Vercel. Chat with one model or compare two answers to the same prompt. Conversations and appearance settings are stored in the current browser; no account is needed.
+[Xyvora](https://xyvora.net) is a chat workspace for open-weight models, built with React and Vite for Vercel. Chat with one model or compare two on the same prompt. Replies stream from `/api/chat`; the browser just renders them. No account, WebGPU, or browser-side model download is needed.
 
 ## Run locally
 
 ```sh
-npm ci
+npm ci --ignore-scripts
 npm run dev
 ```
 
-Without a key, the local development server shows a clearly labeled, scripted interface preview. For real hosted replies, set `AI_GATEWAY_API_KEY` in `.env.local` (see `.env.example`), or deploy to a Vercel project with AI Gateway access and OIDC enabled.
-
-**Qwen On-device** runs the Qwen 2.5 0.5B model using WebLLM on a compatible WebGPU browser. It downloads the model files on first use and does not send prompts to an AI provider. Hosted model choices use Qwen 3 32B, GPT OSS 20B, or Mistral Nemo through Vercel AI Gateway. They are not bundled in this repository.
+By default, the local dev server shows clearly labeled sample replies. Set `XYVORA_SERVER_MODELS=1` in `.env.local` (see `.env.example`) to use real server inference locally. That needs a supported `node-llama-cpp` CPU binding and internet access to download the pinned GGUF files from Hugging Face. A local `AI_GATEWAY_API_KEY` enables real Gateway models instead of samples.
 
 ## Deploy to Vercel
 
-- Framework: **Vite**. Build: `npm run build`. Output: `dist` (set in `vercel.json`).
-- Use the **xyvora-ai** project and add **xyvora.net** as its production domain if not already assigned. Follow the DNS records shown by Vercel; don't replace records for unrelated services.
-- The `/api/chat` function uses the project’s short-lived Vercel OIDC token at runtime. If required, set `AI_GATEWAY_API_KEY` as a **server-side** project environment variable and redeploy. The team needs AI Gateway access and model credits. `XYVORA_DISABLE_HOSTED=1` disables cloud inference for a browser-only deployment.
-- A public hosted endpoint consumes the project's AI Gateway quota. The API limits models, input size, and output length and applies per-instance throttling. Configure a project spend limit and a shared edge rate limit before running it at public scale.
+Use the **xyvora-ai** project with **xyvora.net** as its production domain. The Vite build, Node function, and CPU-only Vercel install are configured in `vercel.json`. Leave existing DNS in place when it is verified.
 
-Hosted prompts, recent conversation turns, and attached text are sent to Vercel AI Gateway and the selected model provider. No messages are stored on the Xyvora server. Avoid sharing sensitive information with hosted models.
+- **Qwen 2.5 Lite** (Qwen 2.5 0.5B Instruct) and **SmolLM2 360M Instruct** run on the Vercel function CPU with llama.cpp. Both models are Apache-2.0. The function downloads and verifies each pinned model when first needed, then reuses it in memory on a warm instance. This can make the first reply slower. The weights are not in Git or the browser bundle.
+- These are lightweight models for short prompts, not the same models as ChatGPT. Output length and context are limited to keep server CPU usage bounded. Compare streams independent replies from both models.
+- **Optional larger models:** after [verifying and enabling AI Gateway](https://vercel.com/docs/ai-gateway/authentication-and-byok) and setting a budget, set `XYVORA_ENABLE_GATEWAY=1` and redeploy. The function can use the request-scoped Vercel OIDC token or a server-side `AI_GATEWAY_API_KEY`. These models are not required for chat or Compare.
+- Vercel compute and transfer quotas still apply without Gateway. The API limits input, output, and per-instance traffic. Configure project spend/usage controls and shared rate limiting before operating at public scale.
+
+## Privacy
+
+Chat history is stored in the current browser. To answer, the Xyvora function receives the prompt, a limited amount of recent conversation, and any attached text. It does not persist messages. If a Gateway model is selected, that context is also sent to Vercel AI Gateway and the model provider. Earlier browser-generated replies remain visible locally and are not automatically included as server context.
 
 ## Checks
 
 ```sh
 npm test
 npm run build
+# Verify real replies from both deployed models (not an availability check):
+node --disable-warning=ExperimentalWarning --experimental-strip-types scripts/smoke-chat.mjs https://xyvora.net
 ```

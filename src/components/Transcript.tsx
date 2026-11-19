@@ -1,4 +1,4 @@
-import { AlertCircle, Check, Clipboard, Cpu, Paperclip, RotateCcw } from 'lucide-react';
+import { AlertCircle, Check, Clipboard, Paperclip, RotateCcw } from 'lucide-react';
 import { useState } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -13,8 +13,8 @@ function AnswerText({ content }: { content: string }) {
   </Markdown></div>;
 }
 
-function AnswerCard({ answer, progress, onRetry, onDevice, onAlert }: {
-  answer: Answer; progress: number | null; onRetry?: () => void; onDevice?: () => void;
+function AnswerCard({ answer, onRetry, onAlert }: {
+  answer: Answer; onRetry?: () => void;
   onAlert: (message: string) => void;
 }) {
   const [copied, setCopied] = useState(false);
@@ -24,12 +24,11 @@ function AnswerCard({ answer, progress, onRetry, onDevice, onAlert }: {
     <header className="answer-heading">
       <ModelIcon id={answer.model} /><strong>{model.name}</strong>
       {answer.source === 'preview' && <span className="answer-tag">Sample</span>}
-      {answer.source === 'on-device' && <span className="answer-tag">On-device</span>}
+      {answer.source === 'legacy' && <span className="answer-tag">Earlier reply</span>}
     </header>
     {answer.content && <AnswerText content={answer.content} />}
     {working && !answer.content && <div className="answer-loading" role="status">
-      {progress !== null && answer.model === 'local' ? <><Cpu size={16} /><span>Loading the on-device model… {Math.min(100, Math.max(0, progress))}%</span></>
-        : <><span className="typing-dots" aria-hidden="true"><i /><i /><i /></span><span>Preparing a reply</span></>}
+      <span className="typing-dots" aria-hidden="true"><i /><i /><i /></span><span>Preparing a reply</span>
     </div>}
     {answer.state === 'error' && <div className="answer-error" role="status"><AlertCircle size={17} /><span>{answer.error}</span></div>}
     {answer.state === 'stopped' && <p className="answer-stopped">Response stopped.</p>}
@@ -42,14 +41,12 @@ function AnswerCard({ answer, progress, onRetry, onDevice, onAlert }: {
         } catch { onAlert('Clipboard access is unavailable in this browser.'); }
       }}>{copied ? <Check size={15} /> : <Clipboard size={15} />}</button>}
       {onRetry && <button type="button" className="bare-icon answer-icon" onClick={onRetry} aria-label="Retry latest prompt" title="Retry latest prompt"><RotateCcw size={15} /></button>}
-      {answer.canUseDevice && onDevice && <button type="button" className="text-button small-button" onClick={onDevice}><Cpu size={15} /> Try on-device</button>}
     </div>}
   </article>;
 }
 
-export function Transcript({ thread, busy, progress, onRetry, onDevice, onAlert }: {
-  thread: Thread; busy: boolean; progress: number | null; onRetry: () => void;
-  onDevice: () => void; onAlert: (message: string) => void;
+export function Transcript({ thread, busy, onRetry, onAlert }: {
+  thread: Thread; busy: boolean; onRetry: () => void; onAlert: (message: string) => void;
 }) {
   return <div className={`transcript${thread.mode === 'compare' ? ' transcript-compare' : ''}`} aria-label="Conversation">
     {thread.turns.map((turn, index) => <section className="turn" key={turn.id}>
@@ -58,9 +55,7 @@ export function Transcript({ thread, busy, progress, onRetry, onDevice, onAlert 
       </div>
       <div className="answer-grid">
         {turn.answers.map((answer, lane) => <AnswerCard key={`${lane}-${answer.model}`} answer={answer}
-          progress={index === thread.turns.length - 1 ? progress : null}
           onRetry={index === thread.turns.length - 1 && !busy && lane === 0 ? onRetry : undefined}
-          onDevice={index === thread.turns.length - 1 && !busy && thread.mode === 'chat' ? onDevice : undefined}
           onAlert={onAlert} />)}
       </div>
     </section>)}

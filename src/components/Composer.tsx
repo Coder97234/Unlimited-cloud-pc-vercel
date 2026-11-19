@@ -1,4 +1,4 @@
-import { ArrowUp, ChevronDown, Cpu, Paperclip, Plus, Square, X } from 'lucide-react';
+import { ArrowUp, ChevronDown, Paperclip, Plus, Square, X } from 'lucide-react';
 import { useLayoutEffect, useRef } from 'react';
 import type { ChangeEvent, RefObject } from 'react';
 import { MAX_ATTACHMENT, MAX_PROMPT, MODELS } from '../../shared/models.ts';
@@ -73,7 +73,6 @@ export function Composer({ draft, onDraft, textarea, attachment, onAttachment, o
         {mode === 'compare' && <span className="composer-compare-label">Sends to both models</span>}
       </div>
       <div className="composer-actions">
-        {model === 'local' && mode === 'chat' && <span className="device-indicator" title="Prompts run in this browser"><Cpu size={14} /> On-device</span>}
         {draft.length > MAX_PROMPT - 400 && <span className="char-count">{draft.length}/{MAX_PROMPT}</span>}
         {busy
           ? <button type="button" className="send-button" title="Stop response" aria-label="Stop response" onClick={onStop}><Square size={14} fill="currentColor" /></button>

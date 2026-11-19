@@ -1,6 +1,6 @@
 import { ArrowUpRight, Check, Columns2, HardDrive, MessageSquare, Moon, Search, ShieldCheck, Sun, Trash2 } from 'lucide-react';
 import { useState } from 'react';
-import { HOSTED_MODELS, MODELS } from '../../shared/models.ts';
+import { MODELS } from '../../shared/models.ts';
 import type { Availability, ModelId } from '../../shared/models.ts';
 import type { Thread } from '../lib/history.ts';
 import { ModelIcon } from './Brand.tsx';
@@ -8,12 +8,11 @@ import { Dialog } from './Dialog.tsx';
 
 export type Theme = 'light' | 'dark';
 
-export function ModelDialog({ value, excluded, lane, availability, onClose, onChoose }: {
-  value: ModelId; excluded?: ModelId; lane?: 0 | 1; availability: Availability | 'loading';
+export function ModelDialog({ value, excluded, lane, models, availability, onClose, onChoose }: {
+  value: ModelId; excluded?: ModelId; lane?: 0 | 1; models: readonly ModelId[]; availability: Availability | 'loading';
   onClose: () => void; onChoose: (id: ModelId) => void;
 }) {
-  const models: ModelId[] = lane === undefined ? [...HOSTED_MODELS, 'local'] : [...HOSTED_MODELS];
-  return <Dialog title="Choose a model" subtitle={lane === undefined ? 'Open models with different strengths. Switch at any time.' : `Pick a hosted model for the ${lane === 0 ? 'left' : 'right'} side of the comparison.`} onClose={onClose}>
+  return <Dialog title="Choose a model" subtitle={lane === undefined ? 'Open models with different strengths. Switch at any time.' : `Pick a model for the ${lane === 0 ? 'left' : 'right'} side of the comparison.`} onClose={onClose}>
     <div className="model-options">
       {models.map((id) => <div key={id} className={`model-option${id === value ? ' selected' : ''}`}>
         <button type="button" disabled={id === excluded} className="model-option-select" onClick={() => onChoose(id)}>
@@ -24,9 +23,8 @@ export function ModelDialog({ value, excluded, lane, availability, onClose, onCh
       </div>)}
     </div>
     <div className="dialog-note"><ShieldCheck size={16} />
-      {availability === 'preview' ? 'Hosted replies are samples in this preview. On-device inference requires a compatible browser.'
-        : availability === 'on-device' ? 'Hosted inference is not connected. Qwen On-device does not need an AI API key.'
-          : 'Hosted prompts go to the model provider. On-device prompts are processed in your browser.'}
+      {availability === 'preview' ? 'Replies are labeled samples in this interface preview.'
+        : 'Replies run on a server. The first reply can take longer while a model starts.'}
     </div>
   </Dialog>;
 }
@@ -75,8 +73,8 @@ export function AboutDialog({ onClose }: { onClose: () => void }) {
   return <Dialog title="About Xyvora" subtitle="A place to chat with open models and compare their answers." onClose={onClose}>
     <div className="about-content">
       <p><strong>Chat:</strong> Choose a model and start a conversation. Switch models whenever you want another perspective.</p>
-      <p><strong>Compare:</strong> Send the same prompt to two hosted models and read their answers side by side.</p>
-      <p><strong>Privacy:</strong> Chat history is saved in this browser. When using a hosted model, your prompt, recent messages, and any attached text are sent to Vercel AI Gateway and the model provider. Qwen On-device downloads model files once, then runs prompts in your browser instead.</p>
+      <p><strong>Compare:</strong> Send the same prompt to two server models and read their answers side by side.</p>
+      <p><strong>Privacy:</strong> Chat history is saved in this browser. Your prompt, recent messages, and any attached text are sent to the Xyvora server to generate a reply. Gateway models, when enabled, also send that context to the model provider.</p>
     </div>
   </Dialog>;
 }

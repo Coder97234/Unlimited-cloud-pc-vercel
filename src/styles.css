@@ -124,6 +124,7 @@ kbd { font-family: inherit; font-size: 10px; font-weight: 550; line-height: 1.2;
 .sidebar-status { display: flex; align-items: center; gap: 8px; border: 0; padding: 6px 7px 11px; background: transparent; color: var(--muted); font-size: 11px; text-align: left; }
 .sidebar-status:hover { color: var(--accent); }
 .status-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: #479879; box-shadow: 0 0 0 3px color-mix(in srgb, #479879 13%, transparent); }
+.status-unavailable { background: var(--danger); box-shadow: none; }
 .status-preview { background: #8e6cdd; box-shadow: 0 0 0 3px color-mix(in srgb, #8e6cdd 15%, transparent); }
 .status-loading { background: var(--muted-soft); box-shadow: none; }
 .workspace-settings { display: flex; align-items: center; gap: 9px; width: 100%; text-align: left; padding: 8px; min-height: 51px; border: 1px solid var(--border); border-radius: 11px; background: var(--surface); }
@@ -185,8 +186,7 @@ kbd { font-family: inherit; font-size: 10px; font-weight: 550; line-height: 1.2;
 .send-button { flex: none; display: grid; place-items: center; width: 36px; height: 36px; padding: 0; border: 0; border-radius: 10px; background: var(--purple-button); color: white; box-shadow: 0 4px 9px rgba(100, 56, 210, .19); }
 .send-button:hover:not(:disabled) { filter: brightness(1.11); }
 .send-button:disabled { opacity: .58; box-shadow: none; }
-.char-count, .device-indicator, .composer-compare-label { color: var(--muted); font-size: 11px; white-space: nowrap; }
-.device-indicator { display: inline-flex; align-items: center; gap: 4px; }
+.char-count, .composer-compare-label { color: var(--muted); font-size: 11px; white-space: nowrap; }
 .attachment-chip { display: flex; align-items: center; gap: 5px; max-width: 100%; min-width: 0; justify-self: start; padding: 3px 4px 3px 8px; background: var(--accent-wash); color: var(--accent); font-size: 11px; font-weight: 600; border-radius: 8px; }
 .attachment-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .attachment-chip button { width: 22px; height: 22px; }
@@ -354,7 +354,6 @@ kbd { font-family: inherit; font-size: 10px; font-weight: 550; line-height: 1.2;
   .suggestion-icon svg { width: 15px; height: 15px; }
   .suggestion-arrow { top: 10px; }
   .model-tag { display: none; }
-  .device-indicator { display: none; }
   .composer { padding: 9px; }
   .main-footer { min-height: 33px; font-size: 10px; padding: 6px 9px; }
 }

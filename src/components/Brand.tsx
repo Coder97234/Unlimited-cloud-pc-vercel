@@ -1,4 +1,4 @@
-import { BrainCircuit, Cpu, Orbit, Wind } from 'lucide-react';
+import { BrainCircuit, Feather, Orbit, Wind } from 'lucide-react';
 import { MODELS } from '../../shared/models.ts';
 import type { ModelId } from '../../shared/models.ts';
 
@@ -24,7 +24,7 @@ export function HeroMark() {
   </div>;
 }
 
-const MODEL_ICONS = { qwen: Orbit, 'gpt-oss': BrainCircuit, mistral: Wind, local: Cpu };
+const MODEL_ICONS = { 'qwen-lite': Orbit, smollm: Feather, qwen: Orbit, 'gpt-oss': BrainCircuit, mistral: Wind };
 export function ModelIcon({ id, size = 17, className = '' }: { id: ModelId; size?: number; className?: string }) {
   const Icon = MODEL_ICONS[id];
   return <span className={`model-icon tint-${MODELS[id].color} ${className}`} aria-hidden="true"><Icon size={size} strokeWidth={1.9} /></span>;

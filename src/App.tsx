@@ -2,8 +2,8 @@ import {
   ArrowLeft, ArrowUpRight, ChevronDown, Columns2, Moon, PanelLeftOpen, Sparkles, Sun, X,
 } from 'lucide-react';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { DEFAULT_MODEL, HOSTED_MODELS, isHostedModel, MODELS } from '../shared/models.ts';
-import type { Availability, HostedModelId, ModelId } from '../shared/models.ts';
+import { DEFAULT_MODEL, isModelId, MODELS, SERVER_MODELS } from '../shared/models.ts';
+import type { Availability, ModelId } from '../shared/models.ts';
 import { HeroMark, ModelIcon } from './components/Brand.tsx';
 import { Composer } from './components/Composer.tsx';
 import { Dialog } from './components/Dialog.tsx';
@@ -14,7 +14,7 @@ import { AboutDialog, ModelDialog, SearchDialog, SettingsDialog } from './compon
 import type { Theme } from './components/WorkspaceDialogs.tsx';
 import { buildMessages, loadThreads, MAX_THREADS, MAX_TURNS, storeThreads, titleForPrompt } from './lib/history.ts';
 import type { Answer, Attachment, ChatMode, Thread, Turn } from './lib/history.ts';
-import { ChatError, streamHosted } from './lib/stream.ts';
+import { ChatError, streamChat } from './lib/stream.ts';
 
 type Modal = { kind: 'models'; lane?: 0 | 1 } | { kind: 'delete'; thread: Thread } | { kind: 'search' | 'settings' | 'about' };
 
@@ -24,7 +24,14 @@ function readTheme(): Theme {
 }
 const emptyTurns: Turn[] = [];
 
-function CompareModels({ models, onChoose, compact = false }: { models: [HostedModelId, HostedModelId]; onChoose: (lane: 0 | 1) => void; compact?: boolean }) {
+function availablePair(preferred: readonly (ModelId | undefined)[], models: readonly ModelId[]): [ModelId, ModelId] {
+  const left = preferred[0] && models.includes(preferred[0]) ? preferred[0] : models[0];
+  const right = preferred[1] && preferred[1] !== left && models.includes(preferred[1])
+    ? preferred[1] : models.find((id) => id !== left)!;
+  return [left, right];
+}
+
+function CompareModels({ models, onChoose, compact = false }: { models: [ModelId, ModelId]; onChoose: (lane: 0 | 1) => void; compact?: boolean }) {
   return <div className={`compare-models${compact ? ' compare-models-compact' : ''}`}>
     {([0, 1] as const).map((lane) => <button type="button" key={lane} className="compare-model" onClick={() => onChoose(lane)} aria-label={`Choose ${lane === 0 ? 'left' : 'right'} model, ${MODELS[models[lane]].name}`}>
       <ModelIcon id={models[lane]} size={20} />
@@ -40,34 +47,38 @@ export default function App() {
   const [draft, setDraft] = useState('');
   const [attachment, setAttachment] = useState<Attachment>();
   const [model, setModel] = useState<ModelId>(DEFAULT_MODEL);
-  const [pair, setPair] = useState<[HostedModelId, HostedModelId]>(['qwen', 'gpt-oss']);
+  const [pair, setPair] = useState<[ModelId, ModelId]>([...SERVER_MODELS]);
+  const [models, setModels] = useState<readonly ModelId[]>(SERVER_MODELS);
   const [availability, setAvailability] = useState<Availability | 'loading'>('loading');
   const [theme, setTheme] = useState<Theme>(readTheme);
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [progress, setProgress] = useState<number | null>(null);
   const [toast, setToast] = useState('');
   const [modal, setModal] = useState<Modal | null>(null);
   const textarea = useRef<HTMLTextAreaElement>(null);
   const pane = useRef<HTMLDivElement>(null);
   const controllerRef = useRef<AbortController | null>(null);
-  const explicitlySelectedModel = useRef(false);
   const followReplies = useRef(true);
   const active = threads.find((thread) => thread.id === activeId);
   const turns = active?.turns ?? emptyTurns;
 
   useEffect(() => {
     const controller = new AbortController();
-    function setMode(mode: Availability) {
-      if (controller.signal.aborted) return;
-      setAvailability(mode);
-      if (mode === 'on-device' && !explicitlySelectedModel.current) setModel('local');
-    }
     fetch('/api/chat', { signal: controller.signal, cache: 'no-store' }).then(async (response) => {
+      if (!response.ok) throw new Error('Chat status unavailable');
       const data = await response.json();
-      setMode(data?.availability === 'hosted' || data?.availability === 'preview' ? data.availability : 'on-device');
-    }).catch(() => setMode('on-device'));
+      if (controller.signal.aborted) return;
+      const available = Array.isArray(data?.models) ? [...new Set<ModelId>(data.models.filter(isModelId))] : [];
+      if ((data?.availability !== 'server' && data?.availability !== 'preview') || available.length < 2) {
+        setAvailability('unavailable');
+        return;
+      }
+      setAvailability(data.availability);
+      setModels(available);
+      setModel((current) => available.includes(current) ? current : available[0]);
+      setPair((current) => availablePair(current, available));
+    }).catch(() => { if (!controller.signal.aborted) setAvailability('unavailable'); });
     return () => controller.abort();
   }, []);
 
@@ -114,14 +125,11 @@ export default function App() {
     setMobileOpen(false);
     setModal(null);
     const answers = thread.turns.at(-1)?.answers;
-    if (thread.mode === 'chat' && answers?.[0]) selectModel(answers[0].model);
-    if (thread.mode === 'compare' && isHostedModel(answers?.[0]?.model) && isHostedModel(answers?.[1]?.model) && answers[0].model !== answers[1].model) {
-      setPair([answers[0].model, answers[1].model]);
-    }
+    if (thread.mode === 'chat' && answers?.[0]) setModel(models.includes(answers[0].model) ? answers[0].model : models[0]);
+    if (thread.mode === 'compare') setPair(availablePair([answers?.[0]?.model, answers?.[1]?.model], models));
     followReplies.current = true;
     if (pane.current) pane.current.scrollTop = pane.current.scrollHeight;
   }
-  function selectModel(id: ModelId) { explicitlySelectedModel.current = true; setModel(id); }
   function deleteThread(thread: Thread) {
     if (thread.id === activeId) setNew(view);
     setThreads((current) => current.filter(({ id }) => id !== thread.id));
@@ -152,11 +160,11 @@ export default function App() {
     return () => window.removeEventListener('keydown', keyboard);
   });
 
-  async function run(retry?: Turn, overrideModel?: ModelId) {
+  async function run(retry?: Turn) {
     const prompt = retry?.prompt ?? draft.trim();
     if (controllerRef.current || !prompt) return;
     const sendingMode = view;
-    const chosen: ModelId[] = sendingMode === 'compare' ? pair : [overrideModel ?? model];
+    const chosen: ModelId[] = sendingMode === 'compare' ? pair : [model];
     const controller = new AbortController();
     controllerRef.current = controller;
     const historical = retry ? turns.slice(0, -1) : turns;
@@ -164,10 +172,7 @@ export default function App() {
     const turnId = retry?.id ?? crypto.randomUUID();
     const turn: Turn = {
       id: turnId, prompt, attachment: retry ? retry.attachment : attachment,
-      answers: chosen.map((id) => ({
-        model: id, content: '', state: 'working',
-        source: id === 'local' ? 'on-device' : availability === 'preview' ? 'preview' : 'hosted',
-      })),
+      answers: chosen.map((id) => ({ model: id, content: '', state: 'working' })),
     };
     const thread: Thread = {
       id: threadId, title: active?.title ?? titleForPrompt(prompt), mode: sendingMode,
@@ -176,7 +181,6 @@ export default function App() {
     setThreads((current) => [thread, ...current.filter(({ id }) => id !== threadId)].slice(0, MAX_THREADS));
     setActiveId(threadId);
     setBusy(true);
-    setProgress(null);
     if (!retry) { setDraft(''); setAttachment(undefined); }
     followReplies.current = true;
     focusPrompt();
@@ -198,10 +202,7 @@ export default function App() {
         };
         try {
           const messages = buildMessages(historical, turn, lane, id);
-          if (id === 'local') {
-            const { streamDevice } = await import('./lib/device.ts');
-            await streamDevice(messages, controller.signal, onText, setProgress);
-          } else await streamHosted(id, messages, controller.signal, onText);
+          await streamChat(id, messages, controller.signal, onText, (source) => update(lane, { source }));
           controller.signal.throwIfAborted();
           if (!content.trim()) throw new ChatError('The model returned an empty reply. Try a shorter prompt or choose another model.');
           update(lane, { state: 'finished', content });
@@ -210,12 +211,11 @@ export default function App() {
           else update(lane, {
             state: 'error', content,
             error: error instanceof ChatError ? error.message : 'The connection was interrupted. Try again.',
-            canUseDevice: error instanceof ChatError && error.canUseDevice,
           });
         } finally { if (frame) cancelAnimationFrame(frame); }
       }));
     } finally {
-      if (controllerRef.current === controller) { controllerRef.current = null; setBusy(false); setProgress(null); }
+      if (controllerRef.current === controller) { controllerRef.current = null; setBusy(false); }
     }
   }
 
@@ -255,8 +255,7 @@ export default function App() {
         <div ref={pane} className="conversation-pane" onScroll={(event) => {
           const { scrollHeight, scrollTop, clientHeight } = event.currentTarget;
           followReplies.current = scrollHeight - scrollTop - clientHeight < 130;
-        }}><Transcript thread={active} busy={busy} progress={progress} onRetry={() => void run(turns.at(-1))}
-          onDevice={() => { selectModel('local'); void run(turns.at(-1), 'local'); }} onAlert={setToast} /></div>
+        }}><Transcript thread={active} busy={busy} onRetry={() => void run(turns.at(-1))} onAlert={setToast} /></div>
         <div className="bottom-composer"><div className="compose-width">{composer}</div></div>
       </> : <div className="welcome-scroll">
         <div className="welcome">
@@ -277,9 +276,9 @@ export default function App() {
       </footer>
     </main>
     {modelDialog && <ModelDialog value={activeLane === undefined ? model : pair[activeLane]} lane={activeLane} excluded={activeLane === undefined ? undefined : pair[activeLane === 0 ? 1 : 0]}
-      availability={availability} onClose={closeModal} onChoose={(id) => {
-        if (activeLane === undefined) selectModel(id);
-        else if (isHostedModel(id) && HOSTED_MODELS.includes(id)) setPair((current) => activeLane === 0 ? [id, current[1]] : [current[0], id]);
+      models={models} availability={availability} onClose={closeModal} onChoose={(id) => {
+        if (activeLane === undefined) setModel(id);
+        else setPair((current) => activeLane === 0 ? [id, current[1]] : [current[0], id]);
         closeModal(); focusPrompt();
       }} />}
     {modal?.kind === 'search' && <SearchDialog threads={threads} onClose={closeModal} onPick={showThread} />}

@@ -5,8 +5,9 @@ import react from '@vitejs/plugin-react';
 import { defineConfig, loadEnv } from 'vite';
 import type { Connect, Plugin } from 'vite';
 import { handleChat } from './server/chat.ts';
+import { generateOnServer } from './server/inference.ts';
 
-function chatInDevelopment(token?: string): Plugin {
+function chatInDevelopment(token: string | undefined, realServerModels: boolean): Plugin {
   const middleware: Connect.NextHandleFunction = (incoming, outgoing, next) => {
     if (incoming.url?.split('?')[0] !== '/api/chat') { next(); return; }
     const controller = new AbortController();
@@ -23,7 +24,12 @@ function chatInDevelopment(token?: string): Plugin {
         init.duplex = 'half';
       }
       const request = new Request('https://dev.xyvora.invalid/api/chat', init);
-      const response = await handleChat(request, { token, preview: true });
+      const response = await handleChat(request, {
+        token,
+        generate: realServerModels ? generateOnServer : undefined,
+        preview: !realServerModels && !token,
+        limit: realServerModels || !!token,
+      });
       outgoing.statusCode = response.status;
       response.headers.forEach((value, key) => outgoing.setHeader(key, value));
       if (response.body) {
@@ -46,7 +52,7 @@ function chatInDevelopment(token?: string): Plugin {
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   return {
-    plugins: [react(), chatInDevelopment(env.AI_GATEWAY_API_KEY)],
+    plugins: [react(), chatInDevelopment(env.AI_GATEWAY_API_KEY, env.XYVORA_SERVER_MODELS === '1')],
     server: { host: '0.0.0.0', allowedHosts: ['.e2b.app'] },
     preview: { host: '0.0.0.0', allowedHosts: ['.e2b.app'] },
   };
