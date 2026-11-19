@@ -105,3 +105,16 @@ In a controlled Vercel **builder** test (`dpl_FFRnQPYXwKLVjSbywRpLsTHefinq`), th
 | Long decode | 28 tokens/s | 28 tokens/s |
 
 In all pairs, greedy reply hashes and token counts matched. The gain is in startup, not sustained generation. Reproduce the comparison after staging the pinned weights with `node --experimental-strip-types scripts/bench-qwen.mjs --threads=2 --samples=3`. These process timings exclude HTTP and are separate from the live measurements.
+
+Live HTTP on `xyvora.net`, from Vercel's `iad1` region, with the same five short prompts (31 characters and seven deltas per reply):
+
+| Short reply measurement | Before `491cb06` | Released `af03bfa` |
+| --- | ---: | ---: |
+| First request: first text | 3,380 ms | 3,052 ms |
+| First request: complete | 3,769 ms | 3,406 ms |
+| Median first text | 373 ms | 378 ms |
+| Median complete | 747 ms | 780 ms |
+
+The first request was faster in this sample; the median was essentially unchanged. These are small samples with mixed instance reuse, not isolated cold-start measurements. The longer prompt got text in 368 ms and completed in 12.76 s on the release (232 deltas), vs. 3.69 s and 13.42 s before (185 deltas). Different reply lengths and instance startup states make the long samples unsuitable for comparing decode speed.
+
+Production deployment `dpl_46u5HjTc216S1tKfabzPMX77h7q2` passed native Qwen, context reuse, cancellation recovery, translation, and search in its build. The separate report `dpl_4JgTZZnSuDzBwRxsSrDKk6aGvqw6` verified the deployed art bytes, Qwen SSE, identity, calculator, clock, and four live search sources on the public domain. A 390 px dark-mode Chromium run measured **301 ms to first on-screen text and 684 ms to completion** for one short reply, with word-driven motion in both the composer and the real stream. The local desktop and mobile checks also covered partial-word streaming, reduced motion, and narrow composer controls.
