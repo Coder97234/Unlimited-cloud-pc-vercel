@@ -91,6 +91,21 @@ After staging the weights, `VERCEL=1 node --experimental-strip-types scripts/che
 
 Run `VERCEL=1 node --experimental-strip-types scripts/bench-instant.mjs --bundle` in a fresh process with staged weights, or pass an HTTPS origin instead of `--bundle` to measure across HTTP. It alternates Normal and Instant for the same short question, with and without older chat history, and reports first text and completion separately. Run the live benchmark separately from the smoke to stay within the chat rate limit.
 
+## Instant release measurements
+
+`3641e7a` shares Normal’s cached system prompt and adds a short brevity hint to the latest turn. Instant keeps at most one previous exchange (up to 1,200 characters) and reserves 96 output tokens for ordinary chat. The engine and its cold-load path are unchanged.
+
+The benchmark alternated modes for the same one-sentence geography question. The older-context case included a synthetic inventory and a recent exchange. All samples returned the correct answer in seven text deltas. Each entry shows the median of three requests, **first text / completion**:
+
+| Input | Normal (bundled) | Instant (bundled) | Normal (live HTTP) | Instant (live HTTP) |
+| --- | ---: | ---: | ---: | ---: |
+| New chat | 122 / 323 ms | 152 / 354 ms | 385 / 717 ms | 381 / 732 ms |
+| Older chat history | 2,703 / 2,943 ms | 240 / 455 ms | 8,712 / 9,165 ms | 569 / 940 ms |
+
+The warm, in-process measurements ran in production build `dpl_CTewadQk7iNoa9Vx6Avni2gurK3B` after one startup request (1,996 / 2,198 ms). The live HTTP sample ran from Vercel's US East build region in report-only job `dpl_AD7nQTqQ4acVLjnJXi6uGGXDD4Ed` after the production alias was assigned. Live numbers include network and instance routing; they do not isolate cold starts. One new-chat Instant request took 3,473 / 3,828 ms. Instant avoids processing older turns, but it does not increase decoding speed or always beat Normal on a fresh small prompt.
+
+The same public report verified `200 application/xml` for the sitemap, `200 text/plain` for robots, `200 text/html` for all three listed pages, a 404 for an unknown path, the `www` redirect, and working site assets and chat streams.
+
 ## Previous release measurements
 
 ### Live latency sample
