@@ -275,5 +275,5 @@ test('hosted images require separate configuration and an access code; only the 
   assert.equal(provider.mock.callCount(), 0);
   const result = await issue({ ...payload, accessCode });
   assert.equal(result.status, 200);
-  assert.deepEqual(await result.json(), { mime: 'image/jpeg', image: '/9j/AAAAAAAAAAAAAA==' });
+  assert.deepEqual(await result.json(), { mime: 'image/jpeg', image: '/9j/AAAAAAAAAAAAAA==', size: '1024x1024' });
 });

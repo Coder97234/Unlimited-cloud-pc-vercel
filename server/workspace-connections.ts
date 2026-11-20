@@ -16,7 +16,7 @@ export type WorkspaceConfig = {
   origin: string;
   sessionKey?: Buffer;
   clients: Partial<Record<Provider, OAuthClient>>;
-  image?: { key: string; accessCode: string };
+  image?: { key: string; accessCode: string; vision?: boolean };
 };
 
 type Env = Record<string, string | undefined>;
@@ -35,8 +35,8 @@ export function workspaceConfig(env: Env): WorkspaceConfig {
     const id = env[`${prefix}_CLIENT_ID`], clientSecret = env[`${prefix}_CLIENT_SECRET`];
     if (sessionKey && id && clientSecret) clients[provider] = { id, secret: clientSecret };
   }
-  const accessCode = env.XYVORA_IMAGE_ACCESS_CODE, key = env.XYVORA_IMAGE_API_KEY;
-  const image = key && accessCode && accessCode.length >= 24 ? { key, accessCode } : undefined;
+  const accessCode = env.XYVORA_IMAGE_ACCESS_CODE?.trim(), key = env.XYVORA_IMAGE_API_KEY?.trim();
+  const image = key && accessCode && accessCode.length >= 24 && accessCode.length <= 180 ? { key, accessCode, vision: env.XYVORA_ENABLE_VISION === '1' } : undefined;
   return { origin, sessionKey, clients, image };
 }
 

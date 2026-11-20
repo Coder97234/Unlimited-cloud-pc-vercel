@@ -30,9 +30,9 @@ export async function boundedJson(message: Request | Response, maxBytes: number)
   } finally { reader.releaseLock(); }
 }
 
-export async function providerJson(url: string, signal: AbortSignal, options: RequestInit = {}, { limit = 128_000, timeout = 9_000 }: { limit?: number; timeout?: number } = {}) {
+export async function providerData(url: string, signal: AbortSignal, options: RequestInit = {}, { limit = 128_000, timeout = 9_000 }: { limit?: number; timeout?: number } = {}) {
   const headers = new Headers(options.headers);
-  headers.set('Accept', 'application/json');
+  if (!headers.has('Accept')) headers.set('Accept', 'application/json');
   try {
     const response = await fetch(url, { ...options, headers, redirect: 'error', cache: 'no-store', signal: AbortSignal.any([signal, AbortSignal.timeout(timeout)]) });
     if (!response.ok) {
@@ -47,9 +47,11 @@ export async function providerJson(url: string, signal: AbortSignal, options: Re
       await response.body?.cancel().catch(() => undefined);
       throw new ToolError('The provider did not return JSON.', 502);
     }
-    return asObject(await boundedJson(response, limit));
+    return await boundedJson(response, limit);
   } catch (error) {
     if (error instanceof ToolError) throw error;
     throw new ToolError('The provider could not be reached or returned invalid data.', 502);
   }
 }
+
+export async function providerJson(...args: Parameters<typeof providerData>) { return asObject(await providerData(...args)); }

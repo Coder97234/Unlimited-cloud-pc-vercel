@@ -54,6 +54,7 @@ export async function streamChat(messages: ChatMessage[], signal: AbortSignal, o
   mode?: ReplyMode;
   searchQuery?: string;
   attachment?: TextAttachment;
+  memory?: string[];
   onText: (delta: string) => void;
   onSource: (source: ReplySource, skill?: SkillResultId) => void;
   onSources: (sources: WebSource[]) => void;
@@ -61,7 +62,7 @@ export async function streamChat(messages: ChatMessage[], signal: AbortSignal, o
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const response = await fetch('/api/chat', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: DEFAULT_MODEL, mode: options.mode, messages, timeZone, searchQuery: options.searchQuery, attachment: options.attachment }), signal,
+    body: JSON.stringify({ model: DEFAULT_MODEL, mode: options.mode, messages, timeZone, searchQuery: options.searchQuery, attachment: options.attachment, memory: options.memory }), signal,
   });
   if (!response.ok || !response.body || !response.headers.get('content-type')?.includes('text/event-stream')) {
     const data = await response.json().catch(() => null);

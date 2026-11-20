@@ -1,4 +1,4 @@
-import { Columns2, HardDrive, MessageSquare, Moon, Search, Sun, Trash2 } from 'lucide-react';
+import { Brain, Columns2, HardDrive, MessageSquare, Moon, Search, Sun, Trash2, UserRound } from 'lucide-react';
 import { useState } from 'react';
 import { XYVORA_NAME, XYVORA_SITE, XYVORA_URL } from '../../shared/models.ts';
 import { ABOUT_PATH, SCHOOLS_PATH, TEAM_LINK_LABEL, TEAM_NAME, XYVORA_SLOGAN } from '../../shared/site.ts';
@@ -25,11 +25,15 @@ export function SearchDialog({ threads, onClose, onPick }: { threads: Thread[]; 
   </Dialog>;
 }
 
-export function SettingsDialog({ theme, count, onTheme, onClear, onClose }: {
-  theme: Theme; count: number; onTheme: (theme: Theme) => void; onClear: () => void; onClose: () => void;
+export function SettingsDialog({ theme, count, signedIn, onAccount, onMemory, onTheme, onClear, onClose }: {
+  theme: Theme; count: number; signedIn: boolean; onAccount: () => void; onMemory: () => void; onTheme: (theme: Theme) => void; onClear: () => void; onClose: () => void;
 }) {
   const [confirm, setConfirm] = useState(false);
   return <Dialog title="Workspace settings" subtitle="Make Xyvora feel at home on this device." onClose={onClose}>
+    <section className="settings-section"><h3>Personalization</h3>
+      <div className="theme-options"><button type="button" className="secondary-button" onClick={onAccount}><UserRound size={16} />{signedIn ? 'Your account' : 'Sign in'}</button>
+        <button type="button" className="secondary-button" onClick={onMemory}><Brain size={16} />Manage memory</button></div>
+    </section>
     <section className="settings-section"><h3>Appearance</h3>
       <div className="theme-options">
         {(['light', 'dark'] as const).map((item) => <button type="button" className={`theme-choice${theme === item ? ' active' : ''}`} key={item} onClick={() => onTheme(item)} aria-pressed={theme === item}>
@@ -43,7 +47,10 @@ export function SettingsDialog({ theme, count, onTheme, onClear, onClose }: {
     {confirm && <div className="confirm-box"><p>Delete all saved conversations on this device? This can’t be undone.</p>
       <div><button type="button" className="secondary-button" onClick={() => setConfirm(false)}>Cancel</button><button type="button" className="danger-button" onClick={() => { onClear(); setConfirm(false); }}>Delete all</button></div>
     </div>}
-    <div className="dialog-note"><HardDrive size={16} /> No account is required. History and theme preferences are kept in this browser.</div>
+    <section className="settings-section"><h3>Privacy &amp; data</h3>
+      <div className="theme-options"><a className="secondary-button" href="/cookies">Cookie choices</a><a className="secondary-button" href="/privacy">Privacy policy</a></div>
+    </section>
+    <div className="dialog-note"><HardDrive size={16} /> No account is required. Saved chats and theme preferences stay in this browser. Temporary chats don’t enter history.</div>
   </Dialog>;
 }
 
@@ -56,7 +63,7 @@ export function AboutDialog({ onClose }: { onClose: () => void }) {
       <p><strong>Web search:</strong> Turn on Web search for a prompt or type <code>/search</code> followed by a query. Results link to their original pages. Search covers the Wiby independent-web index and English Wikipedia; it does not cover every site or guarantee breaking news.</p>
       <p className="brand-downloads"><strong>Brand artwork:</strong> <a href="/brand/xyvora-lockup-4k.webp" download>4K light logo</a> · <a href="/brand/xyvora-lockup-dark-4k.webp" download>4K dark logo</a></p>
       <p><strong>Time and date:</strong> Ask for the time, today’s date, or the time in a city such as Tokyo. Type <code>/time Tokyo</code> for example. The live clock uses your device’s time zone unless you ask for another.</p>
-      <p><strong>Privacy:</strong> History is kept in this browser. On-device tool turns stay there and aren’t included in later chat requests. Other replies can send the prompt, recent chat context, attachments, and time zone to the server. When you use Web search, the query alone is sent to <a href="https://wiby.me/json/" target="_blank" rel="noopener noreferrer">Wiby</a> and <a href="https://foundation.wikimedia.org/wiki/Policy:Privacy_policy" target="_blank" rel="noopener noreferrer">Wikipedia</a> to look up results. Do not include private information in a search.</p>
+      <p><strong>Privacy:</strong> Saved history stays in this browser. Temporary chats aren’t saved; their prompts may still be sent for a reply. On-device tool turns stay there and aren’t included in later chat requests. Other replies can send the prompt, recent chat context, attachments, enabled memory notes, and time zone to the server. Temporary chats and This message only never send memory. Hosted image tools send only approved inputs to OpenAI. When you use Web search, the query alone is sent to <a href="https://wiby.me/json/" target="_blank" rel="noopener noreferrer">Wiby</a> and <a href="https://foundation.wikimedia.org/wiki/Policy:Privacy_policy" target="_blank" rel="noopener noreferrer">Wikipedia</a> to look up results. Do not include private information in a search.</p>
     </div>
   </Dialog>;
 }

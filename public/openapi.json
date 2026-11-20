@@ -1,0 +1,98 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Xyvora Text API",
+    "version": "1.0.0",
+    "description": "Public text replies, streamed as SSE. No API key or payment required. Availability, request, and capacity limits apply. Plugins and media are not part of this API."
+  },
+  "servers": [{ "url": "https://xyvora.net" }],
+  "paths": {
+    "/api/chat": {
+      "get": {
+        "operationId": "getChatStatus",
+        "summary": "Check service availability and supported models, modes and skills",
+        "responses": {
+          "200": {
+            "description": "Current capabilities",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ChatStatus" }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "streamReply",
+        "summary": "Stream a text reply",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ChatRequest" },
+              "example": { "model": "xyvora", "mode": "instant", "messages": [{ "role": "user", "content": "What is 18% of 84.50?" }] }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "SSE text deltas, optional sources, and [DONE] on success. A stream may end with an error event instead. Preview deployments can return labeled samples.",
+            "headers": {
+              "X-Xyvora-Source": { "schema": { "type": "string", "enum": ["server", "preview", "clock", "skill"] } },
+              "X-Xyvora-Skill": { "description": "Present for an instant skill reply", "schema": { "type": "string" } }
+            },
+            "content": { "text/event-stream": { "schema": { "type": "string" }, "example": "data: {\"choices\":[{\"delta\":{\"content\":\"15.21\"}}]}\n\ndata: [DONE]\n\n" } }
+          },
+          "400": { "$ref": "#/components/responses/Error" },
+          "403": { "$ref": "#/components/responses/Error" },
+          "413": { "$ref": "#/components/responses/Error" },
+          "415": { "$ref": "#/components/responses/Error" },
+          "429": {
+            "description": "Rate limited. Wait before retrying.",
+            "headers": { "Retry-After": { "schema": { "type": "integer" }, "description": "Seconds to wait" } },
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          },
+          "503": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    }
+  },
+  "components": {
+    "responses": {
+      "Error": { "description": "Request rejected or service unavailable", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+    },
+    "schemas": {
+      "Mode": { "type": "string", "enum": ["normal", "instant", "thinker", "pro", "creative"] },
+      "ChatStatus": {
+        "type": "object",
+        "required": ["assistant", "availability", "models", "modes", "skills", "webSearch"],
+        "properties": {
+          "assistant": { "type": "object", "properties": { "name": { "type": "string" }, "site": { "type": "string" }, "url": { "type": "string", "format": "uri" } } },
+          "availability": { "type": "string", "enum": ["server", "preview", "unavailable"] },
+          "models": { "type": "array", "items": { "type": "string" } },
+          "modes": { "type": "array", "items": { "$ref": "#/components/schemas/Mode" } },
+          "skills": { "type": "array", "items": { "type": "string" } },
+          "webSearch": { "type": "boolean" }
+        }
+      },
+      "ChatRequest": {
+        "type": "object",
+        "required": ["messages"],
+        "properties": {
+          "model": { "type": "string", "const": "xyvora", "default": "xyvora" },
+          "mode": { "$ref": "#/components/schemas/Mode", "default": "normal" },
+          "messages": {
+            "type": "array", "minItems": 1, "maxItems": 19,
+            "description": "Alternate user and assistant, starting and ending with user. 8,000 context characters total, including attachment text; at most 6,000 in the last message.",
+            "items": { "type": "object", "required": ["role", "content"], "properties": { "role": { "type": "string", "enum": ["user", "assistant"] }, "content": { "type": "string", "minLength": 1, "maxLength": 8000 } } }
+          },
+          "timeZone": { "type": "string", "default": "UTC", "description": "Valid IANA zone, e.g. America/Chicago." },
+          "searchQuery": { "type": "string", "minLength": 1, "maxLength": 350, "description": "Optional query, sent to the configured search services when used." },
+          "memory": { "type": "array", "maxItems": 8, "description": "Optional reference notes supplied by the caller. 1,000 characters total. This is not account memory lookup.", "items": { "type": "string", "maxLength": 220 } },
+          "attachment": { "type": "object", "required": ["name", "text"], "properties": { "name": { "type": "string", "minLength": 1, "maxLength": 120 }, "text": { "type": "string", "minLength": 1, "maxLength": 8000 } } }
+        }
+      },
+      "Error": { "type": "object", "required": ["error"], "properties": { "error": { "type": "string" } } }
+    }
+  }
+}

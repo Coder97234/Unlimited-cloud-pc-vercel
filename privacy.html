@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="How Xyvora handles chat, browser storage, accounts, providers, and optional usage analytics." />
+    <meta name="theme-color" content="#f8f7fb" />
+    <link rel="icon" type="image/png" sizes="64x64" href="/brand/xyvora-icon.png" />
+    <link rel="canonical" href="https://xyvora.net/privacy" />
+    <link rel="stylesheet" href="/src/info.css" />
+    <title>Privacy Policy · Xyvora AI</title>
+  </head>
+  <body class="info-page page-privacy">
+    {{INFO_HEADER}}
+    <main class="info-width info-main" id="content">
+      <section class="info-hero info-hero-single" aria-labelledby="page-title">
+        <div>
+          <p class="info-eyebrow">XYVORA POLICIES</p>
+          <h1 id="page-title">Privacy Policy<span>.</span></h1>
+          <p class="info-lead">What Xyvora receives when you use chat, what stays on this device, and the privacy controls you can use.</p>
+        </div>
+      </section>
+      <section class="info-section info-card" aria-labelledby="device-title">
+        <h2 id="device-title">Chat and files</h2>
+        <p>Guest chat does not require an account. Saved chats, theme, and guest memory stay in local browser storage. Each signed-in account uses separate local chat history. History does not sync across devices and is not an encrypted vault.</p>
+        <p>To generate a reply, the server can receive your current message, limited recent messages, extracted attachment text, enabled memory notes, and time zone. On-device tools can give some answers without a chat request. Temporary chat does not enter history. Temporary chat and This message only do not use saved memory, but can still send the current prompt for processing. These controls do not change hosting logs.</p>
+        <p>Vercel hosts the service and processes the request to serve and protect it. Operational logs can include network, timing, and error information. Xyvora does not put ordinary server chat messages into the account database.</p>
+      </section>
+      <section class="info-section info-card" aria-labelledby="account-title">
+        <h2 id="account-title">Accounts, memory, and tasks</h2>
+        <p>If enabled and you sign in, Xyvora stores the provider and stable identity, account name, verified email when provided, and a session record. If you create a password account, Xyvora stores the username and a salted password hash. Session cookies contain a random token, not provider credentials.</p>
+        <p>Accounts sync only the notes you choose to save. Pause, edit, or remove notes under Memory. When available, background tasks store the prompt, result, status, and timestamps under that account. Results are available in the app for up to 30 days; remove tasks sooner from Background tasks. Expired database records are cleaned up periodically.</p>
+        <p>Sign out to end this browser’s session. Use Your account → Delete account to remove the account, sessions, synced memory, and background tasks from Xyvora’s active database. Clear local chats on other devices separately. Hosting backups and operational logs may be retained separately.</p>
+      </section>
+      <section class="info-section info-card" aria-labelledby="providers-title">
+        <h2 id="providers-title">Optional providers</h2>
+        <ul class="info-list">
+          <li>Web search sends your query to Wiby and Wikipedia. Do not include private data in the query.</li>
+          <li>GitHub’s public API receives the repository, branch, or file read request you approve. The API Explorer can also send approved package lookups to npm. Neither tool can write to those services. A file excerpt is sent for chat only if you attach and send it.</li>
+          <li>Identity sign-in exchanges information with the provider you choose: Google, GitHub, or Discord where configured. Signing in does not connect any plugin.</li>
+          <li>Gmail and Vercel plugins require separate permission. Approved reads use a short-lived connection. Plugin account results aren’t automatically added to chat.</li>
+          <li>Hosted Image Studio and image analysis send the approved prompt or prepared image and question to OpenAI, not your entire chat or saved memory. Saved photo turns store the filename and conversation, not the image bytes. The local 4K graphics generator does not upload a prompt.</li>
+        </ul>
+        <p>External services have their own privacy notices. Disconnect permissions you no longer need in Plugins or at the provider.</p>
+      </section>
+      <section class="info-section info-card" aria-labelledby="measurement-title">
+        <h2 id="measurement-title">Optional measurement</h2>
+        <p>With permission, active browser tabs send an activity signal for the public <a href="/analytics">usage report</a>. Xyvora stores a digest of a random browser identifier and day and last-active time. The measurement tables do not store IP addresses, account IDs, prompts, or pages visited. The server may use the connection IP temporarily to protect the endpoint from abuse.</p>
+        <p>Browser activity is eligible for cleanup after 90 days. Withdrawal removes identified activity from reports and deletes its daily rows, while briefly keeping a revocation marker to prevent older tabs from recording again. Use <a href="/cookies">Cookie choices</a> to opt out.</p>
+      </section>
+      <section class="info-section info-card" aria-labelledby="choices-title">
+        <h2 id="choices-title">Your choices</h2>
+        <p>Clear local conversations in Workspace settings or export an open chat with its download button. Revoke external access in Plugins or at the provider. If you use a shared device, clear this site’s history and sign out when done. For supervised classroom use, read <a href="/schools">For schools</a> and don’t submit student records.</p>
+        <p>For general questions, use the <a href="https://github.com/Coder97234/Unlimited-cloud-pc-vercel/issues">public project issue tracker</a>. Don’t post private account details, student information, or other personal data there.</p>
+      </section>
+    </main>
+    {{INFO_FOOTER}}
+  </body>
+</html>

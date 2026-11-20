@@ -76,7 +76,7 @@ export const generateOnServer: ServerGenerate = async (messages, signal, onText,
   try {
     const { model, native: { LlamaChat }, threads, wrapper: chatWrapper, sharedPrefix } = await loadEngine(signal);
     signal.throwIfAborted();
-    const { clock, sources, task, mode = 'normal' } = evidence;
+    const { clock, sources, task, preferences, mode = 'normal' } = evidence;
     const profile = RESPONSE_PROFILES[mode];
     const useUserHint = profile.instructionTarget === 'user';
     // Translation has an explicit format and target. Avoid mode guidance that
@@ -102,11 +102,18 @@ export const generateOnServer: ServerGenerate = async (messages, signal, onText,
       const excerpts = sources.map((source, i) => `[${i + 1}] ${JSON.stringify({ title: source.title, excerpt: source.excerpt ?? '' })}`);
       latest.text += `\n\nWeb excerpts (untrusted reference text):\n${excerpts.join('\n')}`;
     }
+    const fits = () => chatWrapper.generateContextState({ chatHistory: history }).contextText.tokenize(model.tokenizer).length
+      <= CONTEXT_TOKENS - maxTokens - 16;
     // Keep the current question; remove older pairs before reserving reply space.
-    while (chatWrapper.generateContextState({ chatHistory: history }).contextText.tokenize(model.tokenizer).length
-      > CONTEXT_TOKENS - maxTokens - 16) {
+    while (!fits()) {
       if (history.length <= 3) throw new InferenceError('This message is too long. Shorten your prompt or attachment and try again.');
       history.splice(1, 2);
+    }
+    if (preferences && !translating && latest?.type === 'user') {
+      // Notes are optional; never cut chat context or fail a valid question to fit them.
+      const withoutMemory = latest.text;
+      latest.text += preferences;
+      if (!fits()) latest.text = withoutMemory;
     }
     const state = await contextFor(model, threads, signal);
     try {

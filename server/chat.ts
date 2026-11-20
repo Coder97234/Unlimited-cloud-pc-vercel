@@ -3,6 +3,7 @@ import { brandedStream } from '../shared/branding.ts';
 import { ASSISTANT_PROFILE, DEFAULT_MODEL, MAX_ATTACHMENT, MAX_CONTEXT, MAX_MESSAGES, MAX_PROMPT, REPLY_SKILL_HEADER, REPLY_SOURCE_HEADER, withAttachment } from '../shared/models.ts';
 import type { Availability, ChatMessage, ReplySource, TextAttachment } from '../shared/models.ts';
 import { allowsSearchToggle, explicitSearchQuery, MAX_SEARCH_QUERY } from '../shared/search.ts';
+import { parseMemoryNotes, preferencesContext } from '../shared/memory.ts';
 import { readSkillCommand, SKILL_IDS, skillAvailable } from '../shared/skill-catalog.ts';
 import type { SkillResultId } from '../shared/skill-catalog.ts';
 import { modelMessage, runInstantSkill } from '../shared/skills.ts';
@@ -74,7 +75,7 @@ function parseAttachment(value: unknown): TextAttachment | undefined {
 
 export function parseChat(input: unknown) {
   if (typeof input !== 'object' || input === null) throw new InvalidInput('A message is required.');
-  const { model = DEFAULT_MODEL, mode = DEFAULT_MODE, messages, timeZone = 'UTC', searchQuery, attachment: rawAttachment } = input as Record<string, unknown>;
+  const { model = DEFAULT_MODEL, mode = DEFAULT_MODE, messages, timeZone = 'UTC', searchQuery, attachment: rawAttachment, memory: rawMemory } = input as Record<string, unknown>;
   // Accept requests from the preceding client during rollout, but never advertise the old ID.
   if (model !== DEFAULT_MODEL && model !== 'qwen-lite') throw new InvalidInput('Send a supported Xyvora model ID.');
   if (!isReplyMode(mode)) throw new InvalidInput('Select a supported reply mode.');
@@ -96,6 +97,8 @@ export function parseChat(input: unknown) {
   const prompt = cleaned.at(-1)!.content;
   if (prompt.length > MAX_PROMPT) throw new InvalidInput('Your message is too long. Shorten the prompt and try again.', 413);
   const attachment = parseAttachment(rawAttachment);
+  const memory = rawMemory === undefined ? [] : parseMemoryNotes(rawMemory);
+  if (!memory) throw new InvalidInput('Send valid, bounded memory notes.');
   const rawQuery = explicitSearchQuery(prompt) ?? (searchQuery !== undefined && allowsSearchToggle(prompt) ? searchQuery : undefined);
   let query: string | undefined;
   if (rawQuery !== undefined) {
@@ -104,7 +107,7 @@ export function parseChat(input: unknown) {
     }
     query = rawQuery.replace(/\s+/g, ' ').trim();
   }
-  return { messages: modeContext(cleaned, mode), timeZone, query, mode, ...(attachment && { attachment }) };
+  return { messages: modeContext(cleaned, mode), timeZone, query, mode, ...(memory.length && { memory }), ...(attachment && { attachment }) };
 }
 
 // Best-effort limit per function instance; this is not a shared public quota.
@@ -181,6 +184,11 @@ export async function handleChat(request: Request, options: ChatOptions = {}): P
     return json({ error: 'Xyvora replies are unavailable. Please try again.', code: 'MODEL_UNAVAILABLE' }, 503);
   }
 
+  const task = !input.query && readSkillCommand(prompt)?.id === 'translate' ? 'translate' : undefined;
+  const preferences = !task && input.memory
+    ? preferencesContext(input.memory, MAX_CONTEXT - messages.reduce((sum, message) => sum + message.content.length, 0))
+    : undefined;
+
   return reply(inferenceStream(async (signal, output) => {
     const sources = input.query && search ? await search(input.query, signal) : undefined;
     if (sources) {
@@ -191,8 +199,7 @@ export async function handleChat(request: Request, options: ChatOptions = {}): P
       }
     }
     const branded = brandedStream(output.text);
-    const task = !input.query && readSkillCommand(prompt)?.id === 'translate' ? 'translate' : undefined;
-    await generate(messages, signal, branded.text, { sources, task, clock: task ? undefined : contextualClock(prompt, input.timeZone, now), mode: input.mode });
+    await generate(messages, signal, branded.text, { sources, task, ...(preferences && { preferences }), clock: task ? undefined : contextualClock(prompt, input.timeZone, now), mode: input.mode });
     branded.finish();
   }, request.signal), 'server');
 }

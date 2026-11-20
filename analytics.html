@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="See how many browsers choose to share activity with Xyvora and how often they come back." />
+    <meta name="theme-color" content="#f8f7fb" />
+    <link rel="icon" type="image/png" sizes="64x64" href="/brand/xyvora-icon.png" />
+    <link rel="canonical" href="https://xyvora.net/analytics" />
+    <link rel="stylesheet" href="/src/info.css" />
+    <title>Usage analytics · Xyvora AI</title>
+  </head>
+  <body class="info-page page-analytics">
+    {{INFO_HEADER}}
+    <main class="info-width info-main" id="content">
+      <section class="info-hero info-hero-single" aria-labelledby="page-title">
+        <div>
+          <p class="info-eyebrow">XYVORA TRANSPARENCY</p>
+          <h1 id="page-title">Usage analytics<span>.</span></h1>
+          <p class="info-lead">A public view of Xyvora activity. Browser counts include only visitors who opt in and aren’t a count of every person who uses Xyvora.</p>
+        </div>
+      </section>
+      <div class="metrics-toolbar">
+        <p id="metrics-status" class="metrics-status" role="status">Loading the report…</p>
+        <button class="info-button info-button-secondary" id="refresh-metrics" type="button">Refresh</button>
+      </div>
+      <noscript><p>Enable JavaScript to load the public report. Analytics collection is off when this page runs without JavaScript.</p></noscript>
+      <dl class="metrics-grid" aria-label="Usage totals">
+        <div class="metric metric-highlight"><dt>Active now</dt><dd id="metric-active">—</dd><dd class="metric-detail">Seen in the past 2 minutes</dd></div>
+        <div class="metric"><dt>Browsers today</dt><dd id="metric-today">—</dd><dd class="metric-detail">Unique browsers, UTC</dd></div>
+        <div class="metric"><dt>Unique browsers</dt><dd id="metric-browsers">—</dd><dd class="metric-detail">Last 30 days</dd></div>
+        <div class="metric"><dt>Returning browsers</dt><dd id="metric-returning">—</dd><dd class="metric-detail" id="returning-rate">2+ days in the last 30</dd></div>
+        <div class="metric"><dt>Registered accounts</dt><dd id="metric-accounts">—</dd><dd class="metric-detail">Current accounts, not visits</dd></div>
+      </dl>
+      <div class="metrics-details">
+        <section class="info-card trends" aria-labelledby="trends-title">
+          <p class="info-eyebrow">LAST 30 UTC DAYS</p>
+          <h2 id="trends-title">Daily active browsers</h2>
+          <div class="visits-chart" id="visits-chart" aria-hidden="true"></div>
+          <div class="chart-labels" aria-hidden="true"><span>Start of window</span><span>Today</span></div>
+          <details class="days-details"><summary>View daily counts</summary>
+            <div class="days-scroll"><table><caption>Distinct opted-in browsers by UTC day</caption><thead><tr><th scope="col">UTC day</th><th scope="col">Browsers</th></tr></thead><tbody id="visits-table"></tbody></table></div>
+          </details>
+        </section>
+        <section class="info-card metrics-method" aria-labelledby="method-title">
+          <p class="info-eyebrow">HOW WE COUNT</p>
+          <h2 id="method-title">Browsers, not people</h2>
+          <p>Activity is estimated from recent heartbeats by opted-in browsers. Two tabs on the same browser count once. Devices and cleared storage can count separately.</p>
+          <p>“Returning” means the same browser was active on at least two UTC days in the last 30 days. Account totals are separate; activity isn’t linked to identity.</p>
+          <a class="info-link" href="/cookies">Manage analytics choices <span aria-hidden="true">→</span></a>
+        </section>
+      </div>
+    </main>
+    {{INFO_FOOTER}}
+    <script type="module" src="/src/analytics-page.ts"></script>
+  </body>
+</html>

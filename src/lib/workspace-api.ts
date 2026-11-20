@@ -6,8 +6,9 @@ export async function getWorkspace(signal: AbortSignal): Promise<WorkspaceStatus
   return response.json();
 }
 
-export async function approveTool<T>(payload: object, signal: AbortSignal): Promise<T> {
-  const response = await fetch('/api/workspace', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+export async function approveTool<T>(payload: { action: string; [key: string]: unknown }, signal: AbortSignal): Promise<T> {
+  const path = payload.action === 'vision' ? '/api/workspace?input=image' : '/api/workspace';
+  const response = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ...payload, approved: true }), signal, cache: 'no-store' });
   const result = await response.json().catch(() => null);
   if (!response.ok || !result) throw new Error(typeof result?.error === 'string' ? result.error : 'The tool did not return a result.');

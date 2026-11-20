@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Review essential Xyvora browser storage and turn optional usage analytics on or off." />
+    <meta name="theme-color" content="#f8f7fb" />
+    <link rel="icon" type="image/png" sizes="64x64" href="/brand/xyvora-icon.png" />
+    <link rel="canonical" href="https://xyvora.net/cookies" />
+    <link rel="stylesheet" href="/src/info.css" />
+    <title>Cookie choices · Xyvora AI</title>
+  </head>
+  <body class="info-page page-cookies">
+    {{INFO_HEADER}}
+    <main class="info-width info-main" id="content">
+      <section class="info-hero info-hero-single" aria-labelledby="page-title">
+        <div>
+          <p class="info-eyebrow">PRIVACY CONTROLS</p>
+          <h1 id="page-title">Cookie choices<span>.</span></h1>
+          <p class="info-lead">Optional usage analytics is off by default. Your choice applies to this browser and does not affect access to chat.</p>
+        </div>
+      </section>
+      <section class="info-section info-card info-review" aria-labelledby="choice-title">
+        <h2 id="choice-title">Optional usage analytics</h2>
+        <p id="cookie-choice" role="status">Analytics is off unless you enable it.</p>
+        <p>Allow Xyvora to count this browser in aggregate usage reports. The identifier is independent of Xyvora accounts. Prompts, photos, and messages aren’t collected for these reports.</p>
+        <div class="info-downloads"><button class="info-button info-button-secondary" id="analytics-off" type="button">Turn analytics off</button><button class="info-button info-button-secondary" id="analytics-on" type="button">Allow analytics</button></div>
+        <p>Turning analytics off stops future heartbeats and asks the server to remove activity associated with the current identifier. If the request cannot finish, try again here. Clearing browser storage without turning analytics off first can remove the local identifier needed to perform that deletion.</p>
+        <noscript><p>These controls need JavaScript. This page does not send heartbeats without it.</p></noscript>
+      </section>
+      <section class="info-section info-card" aria-labelledby="storage-title">
+        <h2 id="storage-title">Storage on your device</h2>
+        <dl class="info-detail">
+          <div><dt>Account cookies</dt><dd>When sign-in is enabled, a temporary OAuth state cookie lasts up to 10 minutes and an essential session cookie lasts up to 30 days or until sign-out.</dd></div>
+          <div><dt>Plugin cookies</dt><dd>Only for optional provider connections. Short-lived cookies remember an authorization attempt or keep a read-only connection for up to one hour. Disconnect separately in Plugins.</dd></div>
+          <div><dt>Local storage</dt><dd>Settings, local history, guest memory, and the analytics choice live in this browser. Use workspace settings to clear history, Memory to clear notes, or your browser to remove all site data.</dd></div>
+          <div><dt>Optional identifier</dt><dd>If you opt in, analytics uses a random local-storage identifier rather than an analytics cookie. Global Privacy Control (GPC), when provided by the browser, blocks analytics collection.</dd></div>
+        </dl>
+        <p>Blocking or deleting all site storage can sign you out, disconnect plugins, or remove local preferences and chats.</p>
+      </section>
+    </main>
+    {{INFO_FOOTER}}
+    <script type="module" src="/src/analytics-page.ts"></script>
+  </body>
+</html>

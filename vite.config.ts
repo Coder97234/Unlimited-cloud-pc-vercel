@@ -10,13 +10,26 @@ import { handleChat } from './server/chat.ts';
 import { generateOnServer } from './server/inference.ts';
 import { searchWeb } from './server/web-search.ts';
 import { handleWorkspace } from './server/workspace.ts';
+import { handleAnalytics } from './server/analytics.ts';
+import { productionDb } from './server/database.ts';
+import { localPlatformDb } from './server/local-database.ts';
+import { handleJobs } from './server/jobs.ts';
+import { accountConfig, handleAccount } from './server/account.ts';
 import { workspaceConfig } from './server/workspace-connections.ts';
-import { publicPages } from './server/public-pages.ts';
+import { XYVORA_URL } from './shared/site.ts';
+import { PUBLIC_PAGES, publicPages } from './server/public-pages.ts';
 
-function apiInDevelopment(realServerModel: boolean, settings: ReturnType<typeof workspaceConfig>): Plugin {
+function apiInDevelopment(env: Record<string, string | undefined>): Plugin {
+  const realServerModel = env.XYVORA_SERVER_MODELS === '1';
+  const local = env.XYVORA_LOCAL_PLATFORM === '1';
+  const db = local ? localPlatformDb() : productionDb(env);
+  // The embedded database is a separate, explicitly enabled test deployment.
+  const identityEnv = local ? { XYVORA_ENABLE_PASSWORDS: '1', XYVORA_ENABLE_BACKGROUND: '1' } : env;
+  const chat = { generate: realServerModel ? generateOnServer : undefined, search: realServerModel ? searchWeb : undefined, preview: !realServerModel, limit: realServerModel };
+  const settings = workspaceConfig(env);
   const middleware: Connect.NextHandleFunction = (incoming, outgoing, next) => {
     const path = incoming.url?.split('?')[0];
-    if (path !== '/api/chat' && path !== '/api/workspace') { next(); return; }
+    if (path !== '/api/chat' && path !== '/api/workspace' && path !== '/api/account' && path !== '/api/analytics') { next(); return; }
     const controller = new AbortController();
     outgoing.once('close', () => { if (!outgoing.writableEnded) controller.abort(); });
     void (async () => {
@@ -33,12 +46,14 @@ function apiInDevelopment(realServerModel: boolean, settings: ReturnType<typeof 
       const host = headers.get('host') ?? 'localhost';
       const tls = host.endsWith('.e2b.app') || headers.get('x-forwarded-proto') === 'https';
       const request = new Request(`${tls ? 'https' : 'http'}://${host}${incoming.url}`, init);
-      const response = path === '/api/workspace' ? await handleWorkspace(request, settings, { limit: false }) : await handleChat(request, {
-        generate: realServerModel ? generateOnServer : undefined,
-        search: realServerModel ? searchWeb : undefined,
-        preview: !realServerModel,
-        limit: realServerModel,
-      });
+      const url = new URL(request.url);
+      const localOrigin = local && (url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname.endsWith('.e2b.app')) ? url.origin : undefined;
+      const accounts = local && !localOrigin ? undefined : accountConfig(identityEnv, db, localOrigin);
+      const response = path === '/api/account' ? await handleAccount(request, accounts)
+        : path === '/api/analytics' ? await handleAnalytics(request, accounts?.origin ?? env.XYVORA_ACCOUNT_ORIGIN ?? XYVORA_URL, accounts?.db)
+        : path === '/api/workspace' ? await handleWorkspace(request, settings, { limit: false })
+        : url.searchParams.get('work') === 'jobs' ? await handleJobs(request, accounts, chat, (work) => { void work; })
+        : await handleChat(request, chat);
       outgoing.statusCode = response.status;
       response.headers.forEach((value, key) => { if (key !== 'set-cookie') outgoing.setHeader(key, value); });
       const cookies = response.headers.getSetCookie();
@@ -61,17 +76,17 @@ function apiInDevelopment(realServerModel: boolean, settings: ReturnType<typeof 
 }
 
 export default defineConfig(({ mode }) => {
-  const env = loadEnv(mode, process.cwd(), '');
+  const env = { ...process.env, ...loadEnv(mode, process.cwd(), '') };
   const vercel = JSON.parse(readFileSync(new URL('./vercel.json', import.meta.url), 'utf8')) as { headers: { headers: { key: string; value: string }[] }[] };
   const previewHeaders = Object.fromEntries(vercel.headers[0].headers.map(({ key, value }) => [key, value]));
   return {
     appType: 'mpa',
-    build: { rolldownOptions: { input: ['index.html', 'about.html', 'schools.html'].map((file) => fileURLToPath(new URL(`./${file}`, import.meta.url))) } },
-    plugins: [publicPages(), react(), apiInDevelopment(env.XYVORA_SERVER_MODELS === '1', workspaceConfig({ ...process.env, ...env }))],
+    build: { rolldownOptions: { input: PUBLIC_PAGES.map(([, file]) => fileURLToPath(new URL(`./${file}`, import.meta.url))) } },
+    plugins: [publicPages(), react(), apiInDevelopment(env)],
     server: {
       host: '0.0.0.0',
       allowedHosts: ['.e2b.app'],
-      fs: { deny: ['.env', '.env.*', '*.{crt,pem,key,p12,pfx,cer,der}', '.npmrc', '.yarnrc.yml', '**/.git/**', '**/*.gguf'] },
+      fs: { deny: ['.env', '.env.*', '*.{crt,pem,key,p12,pfx,cer,der}', '.npmrc', '.yarnrc.yml', '**/.git/**', '**/.cache/**', '**/*.gguf'] },
     },
     preview: { host: '0.0.0.0', allowedHosts: ['.e2b.app'], headers: previewHeaders },
   };

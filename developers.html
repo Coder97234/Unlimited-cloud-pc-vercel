@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Send a streaming reply request to the Xyvora AI text API with curl or your backend." />
+    <meta name="theme-color" content="#f8f7fb" />
+    <link rel="icon" type="image/png" sizes="64x64" href="/brand/xyvora-icon.png" />
+    <link rel="canonical" href="https://xyvora.net/developers" />
+    <link rel="stylesheet" href="/src/info.css" />
+    <title>Developer API · Xyvora AI</title>
+  </head>
+  <body class="info-page page-developers">
+    {{INFO_HEADER}}
+    <main class="info-width info-main" id="content">
+      <section class="info-hero info-hero-single" aria-labelledby="page-title">
+        <div>
+          <p class="info-eyebrow">XYVORA FOR DEVELOPERS</p>
+          <h1 id="page-title">Developer API<span>.</span></h1>
+          <p class="info-lead">Add Xyvora text replies to your app. The public endpoint is free to call and needs no API key. Capacity and safety limits still apply.</p>
+        </div>
+      </section>
+      <section class="info-section info-card" aria-labelledby="start-title">
+        <h2 id="start-title">Make a streaming request</h2>
+        <p><code>POST /api/chat</code> accepts JSON and returns server-sent events. Run this example in a terminal or call the endpoint from your server.</p>
+        <pre class="api-code"><code>curl -N https://xyvora.net/api/chat \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"xyvora","mode":"instant","messages":[{"role":"user","content":"Explain why leaves change color."}]}'</code></pre>
+        <div class="info-downloads"><a class="info-button" href="/openapi.json" download>Download OpenAPI ↓</a><a class="info-button info-button-secondary" href="/api/chat">View service status</a></div>
+      </section>
+      <section class="info-section info-card" aria-labelledby="request-title">
+        <h2 id="request-title">Request fields</h2>
+        <dl class="info-detail">
+          <div><dt><code>messages</code></dt><dd>Required. Start with <code>user</code>, alternate <code>assistant</code> and <code>user</code>, and end with <code>user</code>. Up to 19 messages, 8,000 context characters and 6,000 characters on the last message. Attachment content shares the context budget.</dd></div>
+          <div><dt><code>mode</code></dt><dd><code>normal</code> (default), <code>instant</code>, <code>thinker</code>, <code>pro</code>, or <code>creative</code>. Modes change context and generation settings; they are not different models.</dd></div>
+          <div><dt><code>attachment</code></dt><dd>Optional <code>{name, text}</code> reference excerpt. Text only; no file uploads or images on this endpoint.</dd></div>
+          <div><dt>Other options</dt><dd><code>model</code> defaults to <code>xyvora</code>. <code>timeZone</code> accepts an IANA zone. Optional <code>searchQuery</code> can go to external search services. Optional <code>memory</code> is an array of short notes you send, not a lookup of an account.</dd></div>
+        </dl>
+      </section>
+      <section class="info-section info-card" aria-labelledby="events-title">
+        <h2 id="events-title">Read the stream</h2>
+        <ul class="info-list">
+          <li>Append <code>choices[0].delta.content</code> text in order. Some events carry <code>sources</code> metadata instead of text. Ignore SSE comment lines starting with <code>:</code>.</li>
+          <li>Only <code>data: [DONE]</code> means the reply completed. A JSON <code>error</code> event can follow an HTTP 200 when inference fails. Closing the stream requests cancellation.</li>
+          <li>Read <code>X-Xyvora-Source</code> to distinguish server, skill, clock, and preview responses. Preview responses are samples, not live inference.</li>
+        </ul>
+      </section>
+      <section class="info-section info-card" aria-labelledby="scope-title">
+        <h2 id="scope-title">Limits and integrations</h2>
+        <p>Handle <code>429</code> using <code>Retry-After</code> and avoid parallel retries. Input limits, busy responses, and upstream search limits still apply. This is a public service without a throughput guarantee. Cross-site browser calls are not enabled; call from your backend.</p>
+        <p>In the workspace, approve public GitHub and npm reads, or connect supported providers where configured. Those plugins, hosted images, account memory, and background tasks are not part of the public text API. Xyvora does not proxy arbitrary URLs or run actions from a model reply.</p>
+      </section>
+    </main>
+    {{INFO_FOOTER}}
+  </body>
+</html>

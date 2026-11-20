@@ -11,10 +11,12 @@ export function conversationMarkdown(thread: Thread) {
   const parts = [`# ${oneLine(thread.title)}`, `Exported from [${XYVORA_NAME}](${XYVORA_URL}).`];
   for (const turn of thread.turns) {
     parts.push('## You', fencedText(turn.prompt));
+    if (turn.contextOnly) parts.push('*This exchange does not use or supply previous chat context.*');
     if (turn.attachment) parts.push(`Attachment name (contents not exported):\n\n${fencedText(oneLine(turn.attachment.name))}`);
+    if (turn.imageName) parts.push(`Image name (image not stored):\n\n${fencedText(oneLine(turn.imageName))}`);
     for (const answer of turn.answers) {
       const label = thread.mode === 'compare' || answer.source === 'legacy' ? 'Earlier reply'
-        : answer.skill ? skillName(answer.skill) : answer.source === 'clock' ? 'Live clock' : MODES[answer.replyMode ?? DEFAULT_MODE].name;
+        : answer.skill ? skillName(answer.skill) : answer.source === 'clock' ? 'Live clock' : answer.source === 'vision' ? 'Image analysis' : MODES[answer.replyMode ?? DEFAULT_MODE].name;
       parts.push(`### ${XYVORA_NAME} · ${label}${answer.source === 'preview' ? ' (sample)' : ''}`);
       if (answer.content) parts.push(answer.content);
       if (answer.state !== 'finished') parts.push(`*Reply ${answer.state === 'error' ? 'did not complete' : 'was interrupted'}.*`);

@@ -1,0 +1,118 @@
+import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
+import { test } from 'node:test';
+import { accountConfig, digest } from '../server/account.ts';
+import { handleAnalytics } from '../server/analytics.ts';
+import { handleJobs } from '../server/jobs.ts';
+import { ACTIVE_MINUTES, REPORT_DAYS } from '../shared/analytics.ts';
+import { JOB_API } from '../shared/jobs.ts';
+import { platformFixture, platformOrigin as origin, platformPost } from './platform-fixture.ts';
+
+const analytics = '/api/analytics';
+const day = 86_400_000;
+
+test('optional analytics counts real browser presence, UTC returns and accounts separately, and honors withdrawal', async (t) => {
+  const db = await platformFixture(t);
+  let time = Date.UTC(2026, 10, 18, 23, 51);
+  const first = randomUUID(), second = randomUUID();
+  const get = () => new Request(origin + analytics);
+  const options = { limit: false, now: () => time };
+  const api = (request: Request) => handleAnalytics(request, origin, db, options);
+  const report = async () => { const response = await api(get()); assert.equal(response.status, 200); assert.equal(response.headers.get('cache-control'), 'no-store'); return (await response.json()).report; };
+  const ping = (id: string, options = {}, headers = {}) => api(platformPost(analytics, { id, action: 'ping', consent: true, ...options }, headers));
+  const unavailable = await handleAnalytics(get(), origin);
+  assert.deepEqual(await unavailable.json(), { available: false, reason: 'Analytics storage is not configured here.' });
+  assert.equal((await ping(first, { consent: false })).status, 403);
+  assert.equal((await ping(first, {}, { 'Sec-GPC': '1' })).status, 403);
+  assert.equal((await ping(first, {}, { Origin: 'https://other.invalid' })).status, 403);
+  assert.equal((await ping('not-an-id')).status, 400);
+  assert.deepEqual(await db.query('select * from xyvora_browsers'), []);
+  const accountId = randomUUID();
+  await db.query("insert into xyvora_accounts (id,provider,subject,name,email,created_ms) values ($1,'google','fixture','Sample Private Name','fixture@example.invalid',$2)", [accountId, time]);
+  assert.equal((await ping(first)).status, 204);
+  assert.equal((await ping(first, { extra: 'Ignored' }, { 'X-Vercel-Forwarded-For': '192.0.2.1' })).status, 204);
+  assert.equal((await ping(second)).status, 204);
+  const a = await report();
+  assert.deepEqual([a.active, a.today, a.browsers, a.returning, a.accounts], [2, 2, 2, 0, 1]);
+  assert.equal(a.days.length, REPORT_DAYS);
+  assert.deepEqual(a.days.at(-1), { date: '2026-11-18', browsers: 2 });
+  assert.doesNotMatch(JSON.stringify(a), /fixture|Private Name/);
+  const stored = JSON.stringify(await db.query('select * from xyvora_browsers'));
+  for (const value of [first, second, '192.0.2.1', accountId, 'Ignored']) assert.ok(!stored.includes(value));
+  time += ACTIVE_MINUTES * 60_000 + 15_000;
+  assert.equal((await report()).active, 0);
+  time += day;
+  assert.equal((await ping(first)).status, 204);
+  const b = await report();
+  assert.deepEqual([b.active, b.today, b.browsers, b.returning, b.accounts], [1, 1, 2, 1, 1]);
+  assert.equal((await api(platformPost(analytics, { id: first, action: 'forget' }, { 'Sec-GPC': '1' }))).status, 204);
+  const revoked = await report();
+  assert.deepEqual([revoked.active, revoked.today, revoked.browsers, revoked.returning, revoked.accounts], [0, 0, 1, 0, 1]);
+  time += 12_000;
+  assert.equal((await ping(first)).status, 204);
+  assert.equal((await report()).today, 0, 'a delayed ping cannot resurrect a withdrawn identifier');
+  assert.deepEqual(await db.query('select * from xyvora_browser_days where digest = $1', [digest(`xyvora-metrics:${first}`)]), []);
+  time += 91 * day;
+  assert.equal((await ping(randomUUID())).status, 204);
+  assert.equal((await db.query('select * from xyvora_browsers')).length, 1);
+  assert.equal((await report()).returning, 0);
+});
+
+test('background jobs are scoped to verified accounts, finish after the client disconnects and can be cancelled and deleted', async (t) => {
+  const db = await platformFixture(t);
+  const config = accountConfig({ XYVORA_ACCOUNT_ORIGIN: origin, XYVORA_ENABLE_BACKGROUND: '1' }, db)!;
+  function headers(id: string, token: string) { return { 'X-Xyvora-Account': id, Cookie: `__Host-xyvora-session=${token}` }; }
+  async function user(token: string) {
+    const id = randomUUID();
+    await db.query("insert into xyvora_accounts (id,provider,subject,name,created_ms) values ($1,'github',$2,'fixture',$3)", [id, id, Date.now()]);
+    await db.query('insert into xyvora_sessions (digest,account_id,expires_ms) values ($1,$2,$3)', [digest(token), id, Date.now() + day]);
+    return { id, headers: headers(id, token) };
+  }
+  const a = await user('a'.repeat(43)), b = await user('b'.repeat(43));
+  let finish: (() => void) | undefined;
+  const worker: Promise<void>[] = [];
+  const api = (req: Request) => handleJobs(req, config, { generate: async (messages, signal, text, evidence) => {
+    assert.deepEqual(messages, [{ role: 'user', content: 'Outline a short study plan.' }]);
+    assert.equal(evidence.preferences, undefined);
+    await new Promise<void>((resolve, reject) => { finish = resolve; signal.addEventListener('abort', () => reject(signal.reason), { once: true }); });
+    text('Study in three short sessions.');
+  } }, (promise) => worker.push(promise));
+  const list = (headers?: Record<string, string>) => api(new Request(origin + JOB_API, { headers }));
+  const post = (body: object, headers: Record<string, string>, signal?: AbortSignal) => api(platformPost(JOB_API, body, headers, signal));
+  const start = { action: 'start', approved: true, prompt: 'Outline a short study plan.', memory: ['Never used.'] };
+  assert.equal((await list()).status, 401);
+  assert.equal((await post(start, { ...a.headers, Origin: 'https://outside.invalid' })).status, 403);
+  assert.equal((await post({ ...start, approved: false }, a.headers)).status, 400);
+  assert.equal((await post({ ...start, prompt: '/search something' }, a.headers)).status, 400);
+  const client = new AbortController();
+  const created = await post(start, a.headers, client.signal);
+  assert.equal(created.status, 202);
+  assert.equal((await post(start, a.headers)).status, 429);
+  const { id } = await created.json();
+  assert.equal((await list(headers(a.id, 'b'.repeat(43)))).status, 409);
+  assert.deepEqual((await (await list(b.headers)).json()).jobs, []);
+  assert.equal((await post({ action: 'cancel', id }, b.headers)).status, 404);
+  client.abort();
+  assert.ok(finish);
+  finish();
+  await Promise.all(worker);
+  const [finished] = (await (await list(a.headers)).json()).jobs;
+  assert.equal(finished.state, 'finished');
+  assert.equal(finished.result, 'Study in three short sessions.');
+  assert.equal((await post({ action: 'delete', id }, b.headers)).status, 404);
+
+  const another = await post(start, b.headers);
+  assert.equal(another.status, 202);
+  const waiting = (await another.json()).id;
+  assert.equal((await post({ action: 'delete', id: waiting }, b.headers)).status, 404);
+  assert.equal((await post({ action: 'cancel', id: waiting }, b.headers)).status, 200);
+  await Promise.all(worker);
+  const [cancelled] = (await (await list(b.headers)).json()).jobs;
+  assert.equal(cancelled.state, 'cancelled');
+  assert.equal(cancelled.result, '');
+  assert.equal((await post({ action: 'delete', id: waiting }, b.headers)).status, 200);
+  assert.deepEqual((await (await list(b.headers)).json()).jobs, []);
+  await db.query('delete from xyvora_accounts where id=$1', [a.id]);
+  assert.deepEqual(await db.query('select id from xyvora_jobs where id=$1', [id]), []);
+  assert.equal((await list(a.headers)).status, 401);
+});

@@ -1,7 +1,8 @@
 export const PLUGINS = {
   script: { name: 'Script Lab', summary: 'Run JavaScript on this device in an isolated engine. No network, account access, or shell.', example: '/run console.log(20 * 6)' },
-  image: { name: 'Image Studio', summary: 'Make downloadable graphics locally or use a configured text-to-image provider.', example: '/image Violet mountains at dusk' },
-  api: { name: 'API Explorer', summary: 'Review and send read-only requests to supported public APIs.', example: '/api https://api.github.com/repos/octocat/Hello-World' },
+  image: { name: 'Image Studio', summary: 'Generate or analyze images with a configured provider, or make local 4K graphics.', example: '/image Violet mountains at dusk' },
+  repo: { name: 'GitHub workbench', summary: 'Inspect public repositories and issues, bring a file into chat, and export reviewed edits as a patch.', example: '/repo octocat/Hello-World' },
+  api: { name: 'API Explorer', summary: 'Review read-only requests for GitHub repositories, releases, and npm package metadata.', example: '/api https://api.github.com/repos/octocat/Hello-World' },
   gmail: { name: 'Gmail', summary: 'Read up to five inbox subjects, senders, and dates. No message bodies, drafts, or sending.', example: 'Show my latest Gmail messages' },
   vercel: { name: 'Vercel', summary: 'View the connected profile and list the projects it has read access to.', example: 'List my Vercel projects' },
 } as const;
@@ -10,19 +11,19 @@ export type PluginId = keyof typeof PLUGINS;
 export type Provider = 'gmail' | 'vercel';
 export type PluginIntent = { id: PluginId; input?: string };
 export type ConnectionStatus = 'unconfigured' | 'disconnected' | 'connected';
-export type WorkspaceStatus = { connections: Record<Provider, ConnectionStatus>; hostedImages: boolean };
+export type WorkspaceStatus = { connections: Record<Provider, ConnectionStatus>; hostedImages: boolean; hostedVision: boolean };
 export const isProvider = (value: unknown): value is Provider => value === 'gmail' || value === 'vercel';
 
 // Read only the user's current message. Never interpret a generated reply,
 // search result, external data, or an attached document as an invocation.
 export function workspaceIntent(prompt: string): PluginIntent | undefined {
   const text = prompt.trim();
-  const command = /^\/(run|image|api|gmail|vercel)(?:\s+([\s\S]*))?$/i.exec(text);
+  const command = /^\/(run|image|api|repo|gmail|vercel)(?:\s+([\s\S]*))?$/i.exec(text);
   if (command) {
     const id = command[1].toLowerCase();
     const input = command[2]?.trim();
     if (id === 'run') return { id: 'script', input: input ? unfence(input) : undefined };
-    if (id === 'image' || id === 'api') return { id, input };
+    if (id === 'image' || id === 'api' || id === 'repo') return { id, input };
     if (isProvider(id)) return { id };
   }
   const script = /^(?:please )?run (?:this )?(?:javascript|js|script|code|the attached (?:javascript(?: file)?|script))(?:\s*:\s*([\s\S]+))?[.!?]?$/i.exec(text);
@@ -44,9 +45,12 @@ export const PUBLIC_API_EXAMPLE = 'https://api.github.com/repos/octocat/Hello-Wo
 // A registry, not a URL proxy. Rebuild the outbound URL from allowlisted
 // parameters, reject credentials, ports, encoded paths, and any redirects.
 export function publicApiTarget(raw: string) {
-  if (raw.length > 360 || !/^https:\/\/api\.github\.com\//i.test(raw)) return;
+  if (raw.length > 360) return;
   const match = /^https:\/\/api\.github\.com\/repos\/([\da-z][\da-z-]{0,38})\/([\da-z_.-]{1,100})(\/releases\/latest)?$/i.exec(raw);
-  if (!match || match[2] === '.' || match[2] === '..') return;
-  const endpoint = `https://api.github.com/repos/${match[1]}/${match[2]}${match[3] ?? ''}`;
-  return { endpoint, type: match[3] ? 'release' : 'repository' } as const;
+  if (match && match[2] !== '.' && match[2] !== '..') {
+    const endpoint = `https://api.github.com/repos/${match[1]}/${match[2]}${match[3] ?? ''}`;
+    return { endpoint, type: match[3] ? 'release' : 'repository' } as const;
+  }
+  const pkg = /^https:\/\/registry\.npmjs\.org\/((?:@[a-z0-9][a-z0-9._-]{0,80}\/)?[a-z0-9][a-z0-9._-]{0,150})\/latest$/.exec(raw);
+  if (pkg) return { endpoint: `https://registry.npmjs.org/${pkg[1].replace('/', '%2f')}/latest`, type: 'npm' as const };
 }

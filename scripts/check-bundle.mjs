@@ -2,6 +2,9 @@ import assert from 'node:assert/strict';
 import { readdir } from 'node:fs/promises';
 import api from '../api/chat.js';
 import workspace from '../api/workspace.js';
+import account from '../api/account.js';
+import analytics from '../api/analytics.js';
+import { guestAccount } from '../shared/account.ts';
 import { MODE_IDS } from '../shared/modes.ts';
 import { PUBLIC_API_EXAMPLE } from '../shared/workspace-tools.ts';
 import { WIBY_SEARCH_URL, WIKI_SEARCH_URL, searchWeb } from '../server/web-search.ts';
@@ -14,14 +17,20 @@ assert.deepEqual(status.assistant, ASSISTANT_PROFILE);
 assert.deepEqual(status.modes, MODE_IDS);
 assert.deepEqual(status.models, [DEFAULT_MODEL]);
 assert.doesNotMatch(JSON.stringify(status), /qwen/i);
+assert.deepEqual(await (await account.fetch(new Request('https://bundle-check.invalid/api/account'))).json(), guestAccount());
+assert.equal((await (await analytics.fetch(new Request('https://bundle-check.invalid/api/analytics'))).json()).available, false);
 assert.ok(!(await readdir('dist', { recursive: true })).some((file) => file.endsWith('.gguf')));
 const networkFetch = globalThis.fetch;
 let lookupsAllowed = false;
 let publicAllowed = false;
+const publicReads = new Set([
+  PUBLIC_API_EXAMPLE, `${PUBLIC_API_EXAMPLE}/contents?ref=master`, `${PUBLIC_API_EXAMPLE}/contents/README?ref=master`,
+  'https://registry.npmjs.org/react/latest',
+]);
 globalThis.fetch = async (url, options) => {
   const address = new URL(url);
   assert.ok((lookupsAllowed && [WIBY_SEARCH_URL, WIKI_SEARCH_URL].includes(address.origin + address.pathname))
-    || (publicAllowed && address.href === PUBLIC_API_EXAMPLE), 'Unexpected network access');
+    || (publicAllowed && publicReads.has(address.href)), 'Unexpected network access');
   return networkFetch(url, options);
 };
 
@@ -79,6 +88,20 @@ if (process.argv.includes('--plugins')) {
   const reply = await workspace.fetch(apiRequest({ approved: true }));
   assert.equal(reply.status, 200);
   assert.equal((await reply.json()).data.name, 'octocat/Hello-World');
-  console.log('XYVORA_BUNDLE API Explorer: approval, target restriction, and a live GET passed');
+  const npm = await workspace.fetch(apiRequest({ approved: true, target: 'https://registry.npmjs.org/react/latest' }));
+  assert.equal(npm.status, 200);
+  assert.match((await npm.json()).data.version, /^\d+\.\d+\.\d+/);
+  const readRepo = (operation, data) => workspace.fetch(apiRequest({ approved: true, action: 'repository', operation, repo: 'octocat/Hello-World', ...data }));
+  const overview = await readRepo('overview');
+  assert.equal(overview.status, 200);
+  const ref = (await overview.json()).repo.branch;
+  assert.equal(ref, 'master');
+  const files = await readRepo('files', { ref });
+  assert.equal(files.status, 200);
+  assert.ok((await files.json()).entries.some((entry) => entry.path === 'README'));
+  const file = await readRepo('file', { ref, path: 'README' });
+  assert.equal(file.status, 200);
+  assert.match((await file.json()).file.text, /Hello World/);
+  console.log('XYVORA_BUNDLE GitHub repo overview, directory/readme and API Explorer GitHub/npm reads passed');
 }
 console.log(`XYVORA_BUNDLE peak RSS ${Math.round(process.resourceUsage().maxRSS / 1024)} MiB`);

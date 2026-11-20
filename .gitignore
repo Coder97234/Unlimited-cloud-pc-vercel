@@ -8,3 +8,6 @@ dist/
 
 # Generated Node function bundle
 build/
+
+# Embedded development database
+.cache/

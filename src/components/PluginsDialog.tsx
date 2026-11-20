@@ -1,5 +1,8 @@
-import { ArrowDownToLine, ArrowLeft, ArrowUpRight, Code2, Image, Link2, Mail, Play, Server, ShieldCheck, Terminal, Triangle } from 'lucide-react';
+import { ArrowDownToLine, ArrowLeft, ArrowUpRight, Code2, GitBranch, Image, Link2, Mail, Play, Server, ShieldCheck, Terminal, Triangle } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { IMAGE_SIZES } from '../../shared/media.ts';
+import type { RepoWorkbenchDraft } from '../../shared/repositories.ts';
+import type { TextAttachment } from '../../shared/models.ts';
 import { PLUGINS, PUBLIC_API_EXAMPLE, publicApiTarget } from '../../shared/workspace-tools.ts';
 import type { ConnectionStatus, PluginId, PluginIntent, Provider, WorkspaceStatus } from '../../shared/workspace-tools.ts';
 import { ART_STYLES, renderLocalArt } from '../lib/local-image.ts';
@@ -8,10 +11,11 @@ import { runScript } from '../lib/run-script.ts';
 import type { ScriptOutput } from '../lib/sandbox-engine.ts';
 import { approveTool, getWorkspace } from '../lib/workspace-api.ts';
 import { Dialog } from './Dialog.tsx';
+import { RepositoryWorkbench } from './RepositoryWorkbench.tsx';
 
-const icons = { script: Code2, image: Image, api: Server, gmail: Mail, vercel: Triangle };
-const tints = { script: 'violet', image: 'peach', api: 'sky', gmail: 'peach', vercel: 'mint' };
-const labels = { script: 'On this device', image: 'On this device', api: 'Public · GET only', gmail: 'Read-only', vercel: 'Read-only' };
+const icons = { script: Code2, image: Image, repo: GitBranch, api: Server, gmail: Mail, vercel: Triangle };
+const tints = { script: 'violet', image: 'peach', repo: 'mint', api: 'sky', gmail: 'peach', vercel: 'mint' };
+const labels = { script: 'On this device', image: 'On this device', repo: 'Public · patch export', api: 'Public · GET only', gmail: 'Read-only', vercel: 'Read-only' };
 const setupLinks = { gmail: 'https://myaccount.google.com/connections', vercel: 'https://vercel.com/account/settings/authentication' };
 const all = Object.keys(PLUGINS) as PluginId[];
 
@@ -77,15 +81,15 @@ function ApiExplorer({ initial, onInsert }: { initial?: string; onInsert: (value
   const task = useOperation();
   const spec = publicApiTarget(target.trim());
   return <div className="plugin-fields">
-    <p className="plugin-notice"><ShieldCheck size={17} /> Only public GitHub repository and latest-release endpoints. No keys, custom headers, redirects, or write requests.</p>
+    <p className="plugin-notice"><ShieldCheck size={17} /> Public GitHub metadata and releases or npm package metadata. No keys, custom headers, redirects, or write requests.</p>
     <label className="field-label">API endpoint<input data-dialog-focus className="plugin-input plugin-url" type="url" autoCapitalize="none" spellCheck={false}
       value={target} maxLength={360} onChange={(event) => setTarget(event.target.value)} disabled={task.busy} /></label>
     {spec ? <div className="request-preview"><span>GET</span><code>{spec.endpoint}</code></div>
-      : <p className="form-hint">Use <code>https://api.github.com/repos/owner/repository</code> or append <code>/releases/latest</code>.</p>}
-    <p className="form-hint">Approval sends the request above to GitHub, without the chat or attached files.</p>
+      : <p className="form-hint">Use <code>https://api.github.com/repos/owner/repository</code> with optional <code>/releases/latest</code>, or <code>https://registry.npmjs.org/react/latest</code>.</p>}
+    <p className="form-hint">Approval sends the GET request above without your chat or attached files.</p>
     <RunButton task={task} label="Approve & send GET" disabled={!spec} onRun={() => void task.begin(async (signal) => {
       setOutput('');
-      const result = await approveTool<{ data: unknown }>({ action: 'api', method: 'GET', target: spec?.endpoint }, signal);
+      const result = await approveTool<{ data: unknown }>({ action: 'api', method: 'GET', target: target.trim() }, signal);
       signal.throwIfAborted(); setOutput(JSON.stringify(result.data, null, 2));
     })} />
     <ErrorNotice message={task.error} />
@@ -93,50 +97,73 @@ function ApiExplorer({ initial, onInsert }: { initial?: string; onInsert: (value
   </div>;
 }
 
-function ImageStudio({ initial, hosted }: { initial?: string; hosted: boolean }) {
+const sizeLabels = { '1024x1024': 'Square · 1024 × 1024', '1536x1024': 'Landscape · 1536 × 1024', '1024x1536': 'Portrait · 1024 × 1536' };
+type StudioMode = 'local' | 'hosted' | 'vision';
+
+function ImageStudio({ initial, status, statusError, onChoosePhoto }: { initial?: string; status?: WorkspaceStatus; statusError: string; onChoosePhoto: () => void }) {
   const [prompt, setPrompt] = useState((initial || 'A violet sky with a mint aurora').slice(0, 1_200));
   const [caption, setCaption] = useState('');
   const [style, setStyle] = useState<ArtStyle>(() => /mountain|hill|landscape|ridge/i.test(initial ?? '') ? 'Terrain' : /planet|orbit|space/i.test(initial ?? '') ? 'Orbit' : 'Aurora');
-  const [mode, setMode] = useState<'local' | 'hosted'>('local');
+  const [selection, setSelection] = useState<StudioMode>();
+  const [size, setSize] = useState<typeof IMAGE_SIZES[number]>(IMAGE_SIZES[0]);
   const [code, setCode] = useState('');
-  const [image, setImage] = useState<{ url: string; mode: typeof mode }>();
+  const [image, setImage] = useState<{ url: string; local: boolean; dimensions: string }>();
+  const mode = selection ?? (initial && status?.hostedImages ? 'hosted' : 'local');
+  const hosted = status?.hostedImages === true;
   const task = useOperation();
+  const switchTo = (tab: StudioMode) => { setSelection(tab); setCode(''); };
+  const statusText = (name: string, enabled: boolean | undefined, description: string) => enabled ? description
+    : statusError || (status ? `${name} isn’t configured on this deployment. Local graphics still work.` : `Checking ${name.toLowerCase()} availability…`);
   useEffect(() => () => { if (image) URL.revokeObjectURL(image.url); }, [image]);
   return <div className="plugin-fields">
-    <div className="studio-tabs" aria-label="Image generation method">
-      <button type="button" aria-pressed={mode === 'local'} disabled={task.busy} onClick={() => setMode('local')}>Local graphics</button>
-      <button type="button" aria-pressed={mode === 'hosted'} disabled={task.busy} onClick={() => setMode('hosted')}>AI images</button>
+    <div className="studio-tabs" aria-label="Image Studio tools">
+      <button type="button" aria-pressed={mode === 'local'} disabled={task.busy} onClick={() => switchTo('local')}>Local graphics</button>
+      <button type="button" aria-pressed={mode === 'hosted'} disabled={task.busy} onClick={() => switchTo('hosted')}>AI images</button>
+      <button type="button" aria-pressed={mode === 'vision'} disabled={task.busy} onClick={() => switchTo('vision')}>Analyze image</button>
     </div>
-    {mode === 'local' ? <p className="plugin-notice"><ShieldCheck size={17} /> A 4K poster generator. Your words set the colors and pattern for abstract art, not a rendered scene. Nothing is uploaded.</p>
-      : <p className="plugin-notice"><ShieldCheck size={17} /> {hosted ? 'Approval sends only this prompt to OpenAI and can use the owner’s image credits.' : 'Hosted AI images need a provider and access code configured by the site owner. Local graphics work now.'}</p>}
-    <label className="field-label">{mode === 'local' ? 'Describe a mood or color palette' : 'Image prompt'}<textarea data-dialog-focus className="plugin-input" value={prompt}
-      onChange={(event) => setPrompt(event.target.value)} maxLength={1_200} rows={3} disabled={task.busy} /></label>
-    {mode === 'local' ? <div className="studio-options">
-      <label className="field-label">Style<select className="plugin-input" value={style} onChange={(event) => setStyle(event.target.value as ArtStyle)} disabled={task.busy}>
-        {ART_STYLES.map((style) => <option key={style}>{style}</option>)}
-      </select></label>
-      <label className="field-label">Caption <span className="optional">optional</span><input className="plugin-input" value={caption} onChange={(event) => setCaption(event.target.value)}
-        maxLength={88} placeholder="Add a title" disabled={task.busy} /></label>
-    </div> : hosted && <label className="field-label">Studio access code<input className="plugin-input" type="password" autoComplete="off" value={code}
-      onChange={(event) => setCode(event.target.value)} maxLength={180} disabled={task.busy} /></label>}
-    <RunButton task={task} label={mode === 'local' ? 'Generate 4K PNG' : 'Approve & generate'} disabled={!prompt.trim() || (mode === 'hosted' && (!hosted || !code))}
-      onRun={() => void task.begin(async (signal) => {
-        setImage(undefined);
-        let blob: Blob;
-        if (mode === 'local') blob = await renderLocalArt(prompt, style, caption);
-        else {
-          try {
-            const result = await approveTool<{ image: string }>({ action: 'image', prompt, accessCode: code }, signal);
-            blob = new Blob([Uint8Array.from(atob(result.image), (letter) => letter.charCodeAt(0))], { type: 'image/jpeg' });
-          } finally { setCode(''); }
-        }
-        signal.throwIfAborted(); setImage({ url: URL.createObjectURL(blob), mode });
-      })} />
-    <ErrorNotice message={task.error} />
-    {image && <figure className="studio-result"><img src={image.url} alt={image.mode === 'local' ? 'Your generated Xyvora graphic' : 'Your generated AI image'} />
-      <figcaption><span>{image.mode === 'local' ? '4K · 3840 × 2160' : 'AI image · 1024 × 1024'}</span>
-        <a className="secondary-button" download={`xyvora-studio.${image.mode === 'local' ? 'png' : 'jpg'}`} href={image.url}><ArrowDownToLine size={16} /> Download</a></figcaption>
-    </figure>}
+    {mode === 'vision' ? <>
+      <p className="plugin-notice"><ShieldCheck size={17} /> {statusText('Image analysis', status?.hostedVision, 'Ask about a photo, diagram, or screenshot. Review and approve before its resized image and question go to OpenAI.')}</p>
+      <p className="form-hint">One JPEG, PNG, or WebP up to 8 MB. Your image is not saved in chat. A studio access code is required.</p>
+      <div className="plugin-run-row"><button type="button" className="plugin-primary" disabled={!status?.hostedVision} onClick={onChoosePhoto}><Image size={16} /> Attach image to chat</button></div>
+    </> : <>
+      {mode === 'local' ? <p className="plugin-notice"><ShieldCheck size={17} /> A 4K poster generator. Your words set the colors and pattern for abstract art, not a rendered scene. Nothing is uploaded.</p>
+        : <p className="plugin-notice"><ShieldCheck size={17} /> {statusText('Hosted AI images', hosted, 'Approval sends only this prompt and image size to OpenAI and can use the owner’s image credits.')}</p>}
+      <label className="field-label">{mode === 'local' ? 'Describe a mood or color palette' : 'Image prompt'}<textarea data-dialog-focus className="plugin-input" value={prompt}
+        onChange={(event) => setPrompt(event.target.value)} maxLength={1_200} rows={3} disabled={task.busy} /></label>
+      {mode === 'local' ? <div className="studio-options">
+        <label className="field-label">Style<select className="plugin-input" value={style} onChange={(event) => setStyle(event.target.value as ArtStyle)} disabled={task.busy}>
+          {ART_STYLES.map((style) => <option key={style}>{style}</option>)}
+        </select></label>
+        <label className="field-label">Caption <span className="optional">optional</span><input className="plugin-input" value={caption} onChange={(event) => setCaption(event.target.value)}
+          maxLength={88} placeholder="Add a title" disabled={task.busy} /></label>
+      </div> : hosted && <div className="studio-options hosted-options">
+        <label className="field-label">Image shape<select className="plugin-input" value={size} disabled={task.busy} onChange={(event) => setSize(event.target.value as typeof size)}>
+          {IMAGE_SIZES.map((value) => <option key={value} value={value}>{sizeLabels[value]}</option>)}
+        </select></label>
+        <label className="field-label">Studio access code<input className="plugin-input" type="password" autoComplete="off" value={code}
+          onChange={(event) => setCode(event.target.value)} maxLength={180} disabled={task.busy} /></label>
+      </div>}
+      <RunButton task={task} label={mode === 'local' ? 'Generate 4K PNG' : 'Approve & generate'} disabled={!prompt.trim() || (mode === 'hosted' && (!hosted || !code.trim()))}
+        onRun={() => void task.begin(async (signal) => {
+          setSelection(mode); setImage(undefined);
+          let blob: Blob;
+          if (mode === 'local') blob = await renderLocalArt(prompt, style, caption);
+          else {
+            try {
+              const result = await approveTool<{ image: string; size: string }>({ action: 'image', prompt, size, accessCode: code.trim() }, signal);
+              if (typeof result.image !== 'string' || result.size !== size) throw new Error('The provider did not return an image at the requested size.');
+              blob = new Blob([Uint8Array.from(atob(result.image), (letter) => letter.charCodeAt(0))], { type: 'image/jpeg' });
+            } finally { if (!signal.aborted) setCode(''); }
+          }
+          signal.throwIfAborted();
+          setImage({ url: URL.createObjectURL(blob), local: mode === 'local', dimensions: mode === 'local' ? '3840 × 2160' : size.replace('x', ' × ') });
+        })} />
+      <ErrorNotice message={task.error} />
+      {image && <figure className="studio-result"><img src={image.url} alt={image.local ? 'Your generated Xyvora graphic' : 'Your generated AI image'} />
+        <figcaption><span>{image.local ? '4K' : 'AI image'} · {image.dimensions}</span>
+          <a className="secondary-button" download={`xyvora-studio.${image.local ? 'png' : 'jpg'}`} href={image.url}><ArrowDownToLine size={16} /> Download</a></figcaption>
+      </figure>}
+    </>}
   </div>;
 }
 
@@ -180,7 +207,7 @@ function AccountPanel({ provider, status, change }: { provider: Provider; status
   </div>;
 }
 
-export function PluginsDialog({ intent, textInput, onInsert, onClose }: { intent?: PluginIntent; textInput?: string; onInsert: (text: string) => void; onClose: () => void }) {
+export function PluginsDialog({ intent, textInput, onInsert, onChoosePhoto, repoDraft, onRepoFile, onClose }: { intent?: PluginIntent; textInput?: string; onInsert: (text: string) => void; onChoosePhoto: () => void; repoDraft?: RepoWorkbenchDraft; onRepoFile: (attachment: TextAttachment, draft: RepoWorkbenchDraft) => void; onClose: () => void }) {
   const [id, setId] = useState(intent?.id);
   const [status, setStatus] = useState<WorkspaceStatus>();
   const [error, setError] = useState('');
@@ -203,14 +230,15 @@ export function PluginsDialog({ intent, textInput, onInsert, onClose }: { intent
           return <button type="button" className="plugin-card" key={key} onClick={() => setId(key)}>
             <span className={`plugin-icon tint-${tints[key]}`}><Icon size={20} /></span><ArrowUpRight size={15} className="plugin-arrow" />
             <strong>{PLUGINS[key].name}</strong><span className="plugin-card-text">{PLUGINS[key].summary}</span>
-            <span className="plugin-label">{connection === 'connected' ? 'Connected · read-only' : connection === 'unconfigured' ? 'Needs setup' : labels[key]}</span>
+            <span className="plugin-label">{key === 'image' && (status?.hostedImages || status?.hostedVision) ? 'Local + hosted' : connection === 'connected' ? 'Connected · read-only' : connection === 'unconfigured' ? 'Needs setup' : labels[key]}</span>
           </button>;
         })}
       </div>
     </>}
     {id === 'script' && <ScriptLab initial={intent?.id === id ? intent.input ?? '' : undefined} textInput={textInput} onInsert={onInsert} />}
+    {id === 'repo' && <RepositoryWorkbench initial={intent?.id === id ? intent.input : undefined} workingCopy={repoDraft} onAttach={onRepoFile} />}
     {id === 'api' && <ApiExplorer initial={intent?.id === id ? intent.input : undefined} onInsert={onInsert} />}
-    {id === 'image' && <ImageStudio initial={intent?.id === id ? intent.input : undefined} hosted={status?.hostedImages === true} />}
+    {id === 'image' && <ImageStudio initial={intent?.id === id ? intent.input : undefined} status={status} statusError={error} onChoosePhoto={onChoosePhoto} />}
     {(id === 'gmail' || id === 'vercel') && <AccountPanel key={id} provider={id} status={status?.connections[id]}
       change={(connection) => setStatus((value) => value ? { ...value, connections: { ...value.connections, [id]: connection } } : value)} />}
   </Dialog>;
