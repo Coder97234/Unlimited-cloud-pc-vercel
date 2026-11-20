@@ -1,10 +1,10 @@
-import { BrainCircuit, Check, Layers3, Sparkles, WandSparkles } from 'lucide-react';
+import { BrainCircuit, Check, Layers3, Sparkles, WandSparkles, Zap } from 'lucide-react';
 import { MODE_IDS, MODES } from '../../shared/modes.ts';
 import type { ReplyMode } from '../../shared/modes.ts';
 import { Dialog } from './Dialog.tsx';
 
-export const MODE_ICONS = { normal: Sparkles, thinker: BrainCircuit, pro: Layers3, creative: WandSparkles };
-const tints = { normal: 'violet', thinker: 'sky', pro: 'mint', creative: 'peach' };
+export const MODE_ICONS = { normal: Sparkles, instant: Zap, thinker: BrainCircuit, pro: Layers3, creative: WandSparkles };
+const tints = { normal: 'violet', instant: 'peach', thinker: 'sky', pro: 'mint', creative: 'peach' };
 
 export function ModeDialog({ mode, onPick, onClose }: { mode: ReplyMode; onPick: (mode: ReplyMode) => void; onClose: () => void }) {
   return <Dialog title="Reply mode" subtitle="Choose how Xyvora answers your next message. Tools and permissions stay the same." onClose={onClose}>

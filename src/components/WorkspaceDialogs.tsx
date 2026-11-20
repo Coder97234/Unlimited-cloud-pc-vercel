@@ -1,6 +1,7 @@
 import { Columns2, HardDrive, MessageSquare, Moon, Search, Sun, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { XYVORA_NAME, XYVORA_SITE, XYVORA_URL } from '../../shared/models.ts';
+import { ABOUT_PATH, SCHOOLS_PATH, TEAM_LINK_LABEL, TEAM_NAME, XYVORA_SLOGAN } from '../../shared/site.ts';
 import type { Thread } from '../lib/history.ts';
 import { Dialog } from './Dialog.tsx';
 
@@ -47,9 +48,10 @@ export function SettingsDialog({ theme, count, onTheme, onClear, onClose }: {
 }
 
 export function AboutDialog({ onClose }: { onClose: () => void }) {
-  return <Dialog title={`About ${XYVORA_NAME}`} subtitle={`The AI assistant at ${XYVORA_SITE}.`} onClose={onClose}>
+  return <Dialog title={`About ${XYVORA_NAME}`} subtitle={XYVORA_SLOGAN} onClose={onClose}>
     <div className="about-content">
-      <p><strong>{XYVORA_NAME}</strong> is the assistant at <a href={XYVORA_URL} target="_blank" rel="noopener noreferrer">{XYVORA_SITE}</a>. Use Normal for everyday chat, Thinker for comparisons, Pro for technical work, or Creative for ideas. Earlier chats and comparisons remain in your history.</p>
+      <p><strong>{XYVORA_NAME}</strong> is the assistant at <a href={XYVORA_URL} target="_blank" rel="noopener noreferrer">{XYVORA_SITE}</a>. Choose Instant for a quick reply, Normal for everyday chat, Thinker for comparisons, Pro for technical work, or Creative for ideas. Earlier chats and comparisons remain in your history.</p>
+      <p>Built by the <strong>{TEAM_NAME}</strong>. <a href={ABOUT_PATH}>{TEAM_LINK_LABEL}</a> · <a href={SCHOOLS_PATH}>Information for schools</a></p>
       <p><strong>Built-in tools:</strong> Ask for math, conversions, time, or help with a file. Type <code>/tools</code> for commands. Plugins ask you to review scripts, account reads, and external requests before they run.</p>
       <p><strong>Web search:</strong> Turn on Web search for a prompt or type <code>/search</code> followed by a query. Results link to their original pages. Search covers the Wiby independent-web index and English Wikipedia; it does not cover every site or guarantee breaking news.</p>
       <p className="brand-downloads"><strong>Brand artwork:</strong> <a href="/brand/xyvora-lockup-4k.webp" download>4K light logo</a> · <a href="/brand/xyvora-lockup-dark-4k.webp" download>4K dark logo</a></p>

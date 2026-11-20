@@ -43,7 +43,7 @@ async function check(label, content, expected, { timeZone = 'UTC', searchQuery, 
   if (searchQuery) assert.ok(sources.every(({ excerpt }) => excerpt === undefined), 'Only source metadata should reach the client');
   console.log(`XYVORA_BUNDLE ${label}: first ${Math.round(first)}ms, finished ${Math.round(performance.now() - start)}ms, ${count} deltas${searchQuery ? `, ${sources.length} live sources` : ''}`);
 }
-await check('identity', 'Who exactly are you?', /Xyvora AI.*xyvora\.net/, { source: 'skill', skill: 'about' });
+await check('identity', 'Who made Xyvora AI?', /Xyvora AI.*xyvora\.net.*Ethan Bennett.*Noberto Dominguez.*xyvora\.net\/about/s, { source: 'skill', skill: 'about' });
 await check('calculator', 'What is 18% of 84.50?', /15\.21/, { source: 'skill', skill: 'calc' });
 await check('clock', '/time Tokyo', /\d{1,2}:\d{2}.*Asia\/Tokyo/, { source: 'clock', skill: 'time' });
 await check('fresh engine', 'What is the capital of France? Answer in one short sentence.', /paris/i);
@@ -51,6 +51,7 @@ await check('reused context with a different request', 'What is the capital of J
 await check('reused engine', 'What is the capital of France? Answer in one short sentence.', /paris/i);
 await check('Thinker generation', 'What is the capital of France? Answer in one short sentence.', /paris/i, { mode: 'thinker' });
 await check('Pro generation', 'What is the capital of Japan? Answer in one short sentence.', /tokyo/i, { mode: 'pro' });
+await check('Instant generation', 'What is the capital of France? Answer in one short sentence.', /paris/i, { mode: 'instant' });
 // Cancel real native generation and verify the next request on the same state.
 const stop = new AbortController();
 const interrupted = await api.fetch(new Request(url, {
@@ -59,12 +60,13 @@ const interrupted = await api.fetch(new Request(url, {
 }));
 await assert.rejects(readChatEvents(interrupted.body, () => stop.abort(), true), /ended before the reply finished/);
 await check('after cancellation', 'What is the capital of Japan? Answer in one short sentence.', /tokyo/i);
-await check('translate workflow', '/translate Spanish: Good morning!', /buenos d[íi]as/i);
+await check('Creative translation', '/translate Spanish: Good morning!', /buenos d[íi]as/i, { mode: 'creative' });
+await check('Instant translation', '/translate Spanish: Good morning!', /buenos d[íi]as/i, { mode: 'instant' });
 if (process.argv.includes('--search')) {
   lookupsAllowed = true;
   const independent = await searchWeb('unix shell tutorial', AbortSignal.timeout(7_000));
   console.log(`XYVORA_BUNDLE provider check: ${[...new Set(independent.map(({ provider }) => provider))].join(', ') || 'no results'}`);
-  await check('live search', 'What is NASA’s Artemis program?', /artemis|nasa|moon/i, { searchQuery: 'NASA Artemis program' });
+  await check('live search', 'What is NASA’s Artemis program?', /artemis|nasa|moon/i, { searchQuery: 'NASA Artemis program', mode: 'instant' });
 }
 const apiRequest = (data) => new Request('https://bundle-check.invalid/api/workspace', {
   method: 'POST', headers: { Origin: 'https://bundle-check.invalid', 'Content-Type': 'application/json' },

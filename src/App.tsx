@@ -2,6 +2,7 @@ import { ArrowUpRight, Blocks, Download, Moon, PanelLeftOpen, Sparkles, Sun, X }
 import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { DEFAULT_MODEL, MAX_PROMPT, XYVORA_NAME, XYVORA_SITE } from '../shared/models.ts';
 import type { Availability } from '../shared/models.ts';
+import { ABOUT_PATH, SCHOOLS_PATH, XYVORA_SLOGAN } from '../shared/site.ts';
 import { allowsSearchToggle, chatSearchQuery, MAX_SEARCH_QUERY } from '../shared/search.ts';
 import { DEFAULT_MODE } from '../shared/modes.ts';
 import type { ReplyMode } from '../shared/modes.ts';
@@ -246,7 +247,7 @@ export default function App() {
     let content = '';
     let frame = 0;
     try {
-      await streamChat(buildMessages(historical, turn), controller.signal, {
+      await streamChat(buildMessages(historical, turn, mode), controller.signal, {
         searchQuery, attachment: attached, mode,
         onText: (delta) => {
           if (controller.signal.aborted) return;
@@ -322,7 +323,7 @@ export default function App() {
         <div className="welcome">
           <div className="welcome-heading">
             <BrandLockup dark={theme === 'dark'} />
-            <span className="workspace-kicker"><Sparkles size={13} strokeWidth={2.1} /> YOUR AI WORKSPACE</span>
+            <span className="workspace-kicker"><Sparkles size={13} strokeWidth={2.1} /> {XYVORA_SLOGAN}</span>
             <h1>What’s on your mind<span>?</span></h1><p>Ask a question, bring a file, or make something with <strong>{XYVORA_NAME}</strong>.</p>
           </div>
           {composer}
@@ -332,7 +333,10 @@ export default function App() {
       </div>}
       <footer className="main-footer">
         <span>{XYVORA_NAME} can make mistakes. Check important information.</span>
-        <button type="button" className="footer-link" onClick={() => setModal({ kind: 'about' })}>About <ArrowUpRight size={12} /></button>
+        <nav className="footer-nav" aria-label="About Xyvora">
+          <a className="footer-link" href={ABOUT_PATH}>About <ArrowUpRight size={12} /></a>
+          <a className="footer-link" href={SCHOOLS_PATH}>For schools <ArrowUpRight size={12} /></a>
+        </nav>
       </footer>
     </main>
     {modal?.kind === 'search' && <SearchDialog threads={threads} onClose={closeModal} onPick={showThread} />}

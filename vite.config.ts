@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type { ReadableStream as NodeReadableStream } from 'node:stream/web';
@@ -10,6 +11,7 @@ import { generateOnServer } from './server/inference.ts';
 import { searchWeb } from './server/web-search.ts';
 import { handleWorkspace } from './server/workspace.ts';
 import { workspaceConfig } from './server/workspace-connections.ts';
+import { publicPages } from './server/public-pages.ts';
 
 function apiInDevelopment(realServerModel: boolean, settings: ReturnType<typeof workspaceConfig>): Plugin {
   const middleware: Connect.NextHandleFunction = (incoming, outgoing, next) => {
@@ -63,7 +65,9 @@ export default defineConfig(({ mode }) => {
   const vercel = JSON.parse(readFileSync(new URL('./vercel.json', import.meta.url), 'utf8')) as { headers: { headers: { key: string; value: string }[] }[] };
   const previewHeaders = Object.fromEntries(vercel.headers[0].headers.map(({ key, value }) => [key, value]));
   return {
-    plugins: [react(), apiInDevelopment(env.XYVORA_SERVER_MODELS === '1', workspaceConfig({ ...process.env, ...env }))],
+    appType: 'mpa',
+    build: { rolldownOptions: { input: ['index.html', 'about.html', 'schools.html'].map((file) => fileURLToPath(new URL(`./${file}`, import.meta.url))) } },
+    plugins: [publicPages(), react(), apiInDevelopment(env.XYVORA_SERVER_MODELS === '1', workspaceConfig({ ...process.env, ...env }))],
     server: {
       host: '0.0.0.0',
       allowedHosts: ['.e2b.app'],

@@ -1,3 +1,4 @@
+import { ABOUT_URL, TEAM, TEAM_LINK_LABEL, TEAM_NAME } from './site.ts';
 import { compareLists, csvSummary, encodeText, jsonPointer } from './data-tools.ts';
 import { PLUGINS, workspaceIntent } from './workspace-tools.ts';
 import { calculate, naturalCalculation } from './calculator.ts';
@@ -109,7 +110,7 @@ export function runInstantSkill(prompt: string, attachedText?: string): InstantR
     else if (/^(?:please )?count (?:the )?words in (?:this|the|my) (?:attached )?(?:text|file|document)$/i.test(text)) id = 'text';
   }
   switch (id) {
-    case 'about': return { id, text: `${identity} I can help you write, learn, search the web, and use built-in tools. Try \`/tools\` to see what’s available.` };
+    case 'about': return { id, text: `${identity} I was built by the **${TEAM_NAME}**.\n\n${TEAM.map(({ name, role }) => `- **${name}** — ${role}`).join('\n')}\n\n[${TEAM_LINK_LABEL}](${ABOUT_URL}).` };
     case 'skills': return { id, text: `${identity}\n\nHere are the tools on ${XYVORA_SITE}:\n\n${SKILL_IDS.filter((key) => key !== 'about').map((key) => `- **${SKILLS[key].name}** · \`/${key}\` — ${SKILLS[key].description}`).join('\n')}\n\n**Plugins (review before running):**\n${Object.values(PLUGINS).map((plugin) => `- **${plugin.name}** · \`${plugin.example}\``).join('\n')}` };
     case 'calc': return { id, text: calculate(argument) };
     case 'convert': return { id, text: convert(argument) };

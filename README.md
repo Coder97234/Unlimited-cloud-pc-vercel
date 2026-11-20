@@ -1,8 +1,15 @@
 # Xyvora AI
 
-[Xyvora AI](https://xyvora.net) is a chat and tools workspace. **Normal** is the default for new chats. **Thinker** asks the assistant to check assumptions and explain a conclusion; **Pro** asks for practical steps and verification; **Creative** uses more varied sampling for ideas and stories. These modes change instructions and generation settings, not the underlying engine or tool permissions. Earlier conversations remain readable in local history.
+[Xyvora AI](https://xyvora.net) is a chat and tools workspace. **Normal** is the default for new chats. **Instant** prioritizes a quick, short reply with at most one small preceding exchange and a 96-token chat reply limit. Explicit translation keeps Normal’s longer output budget. **Thinker** asks the assistant to check assumptions and explain a conclusion; **Pro** asks for practical steps and verification; **Creative** uses more varied sampling for ideas and stories. These modes change instructions and generation settings, not the underlying engine or tool permissions. Earlier conversations remain readable in local history.
 
 The welcome screen and animated frog keep the supplied Xyvora art. The welcome logo has a responsive HD version. Download the transparent **3840 × 1284** light and dark lockups from **About**. These are sharpened, high-resolution exports of the supplied artwork, not a new mascot or vector tracing. Reduced-motion preferences still disable the frog’s hop and blink.
+
+## Public pages and employee email
+
+- [Meet the Xyvora team](https://xyvora.net/about) is the public credits page. The chat identity reply uses the same team data. The About and [For schools](https://xyvora.net/schools) pages are static HTML and don’t require JavaScript.
+- [Sitemap](https://xyvora.net/sitemap.xml) lists the canonical public pages and is referenced by [robots.txt](https://xyvora.net/robots.txt). Submit the sitemap URL through the domain’s search console if desired.
+- If a school blocks the domain, give a teacher or administrator the URL, block message, and intended classroom use and ask for a review. The For schools page explains the site’s privacy and network requirements; it does not change a school’s filters.
+- [Employee email setup](docs/employee-email.md) records the proposed addresses and how to add them with the existing mail administrator without disturbing current mail.
 
 ## Chat tools
 
@@ -65,7 +72,7 @@ Use **xyvora-ai** with **xyvora.net** as its production domain. `vercel.json` co
 
 Chat history stays in the browser. On-device tool turns are skipped in future requests. Ordinary replies can send the prompt, limited recent context, extracted attachment text, and browser time zone to the server. Don’t put private data in search queries. Source links provide attribution, including Wikipedia’s [CC BY-SA license](https://en.wikipedia.org/wiki/Wikipedia:Copyrights).
 
-`GET /api/chat` reports Xyvora’s identity, modes, tools, and availability. `POST /api/chat` accepts alternating `messages` ending with a user message, optional `model: "xyvora"`, `mode` (`normal`, `thinker`, `pro`, `creative`), `timeZone`, `searchQuery`, and `attachment: {name, text}`. Older requests and saved chats still work. Replies stream as SSE with `[DONE]` on success. `X-Xyvora-Source` and `X-Xyvora-Skill` report the reply’s origin.
+`GET /api/chat` reports Xyvora’s identity, modes, tools, and availability. `POST /api/chat` accepts alternating `messages` ending with a user message, optional `model: "xyvora"`, `mode` (`normal`, `instant`, `thinker`, `pro`, `creative`), `timeZone`, `searchQuery`, and `attachment: {name, text}`. Older requests and saved chats still work. Replies stream as SSE with `[DONE]` on success. `X-Xyvora-Source` and `X-Xyvora-Skill` report the reply’s origin.
 
 `GET /api/workspace` reports connection and hosted image availability or completes an OAuth state/code callback. `POST /api/workspace` accepts only same-origin JSON with `approved: true`; separate checks enforce the request registry, account session, provider configuration, and size and rate limits. Plugins cannot send arbitrary API calls, write to connected accounts, or access the chat model.
 
@@ -74,10 +81,15 @@ Chat history stays in the browser. On-device tool turns are skipped in future re
 ```sh
 npm test
 npm run build
+npm run check:site
+# Or verify deployed HTTP statuses and content types:
+npm run check:site -- https://xyvora.net
 node --experimental-strip-types scripts/smoke-chat.mjs https://xyvora.net
 ```
 
 After staging the weights, `VERCEL=1 node --experimental-strip-types scripts/check-bundle.mjs` checks the actual bundled handlers, native modes, tools, and cancellation. `--search` tests the real search indexes and `--plugins` runs one real read-only API Explorer GET. OAuth and hosted-image tests use fixture provider responses; actual consent and paid image generation require separate credentials. There are no account credentials in fixtures.
+
+Run `VERCEL=1 node --experimental-strip-types scripts/bench-instant.mjs --bundle` in a fresh process with staged weights, or pass an HTTPS origin instead of `--bundle` to measure across HTTP. It alternates Normal and Instant for the same short question, with and without older chat history, and reports first text and completion separately. Run the live benchmark separately from the smoke to stay within the chat rate limit.
 
 ## Previous release measurements
 

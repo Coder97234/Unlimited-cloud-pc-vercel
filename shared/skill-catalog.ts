@@ -1,6 +1,8 @@
+import { TEAM } from './site.ts';
+
 // One catalog drives commands and the assistant’s tool guide.
 export const SKILLS = {
-  about: { group: 'instant', name: 'About Xyvora', description: 'Find the assistant’s name and website.', example: 'Who are you?' },
+  about: { group: 'instant', name: 'About Xyvora', description: 'Find the assistant’s name, website, and team.', example: 'Who are you?' },
   calc: { group: 'instant', name: 'Calculator', description: 'Evaluate arithmetic, percentages, powers, and square roots.', example: '/calc 18% of 84.50' },
   convert: { group: 'instant', name: 'Unit converter', description: 'Convert distance, weight, volume, temperature, speed, or duration.', example: '/convert 72 F to C' },
   split: { group: 'instant', name: 'Tip & split', description: 'Calculate a tip and split a bill in US dollars, down to the cent.', example: '/split 84.50 + 18% / 3' },
@@ -36,6 +38,7 @@ export function skillAvailable(id: SkillId, canGenerate: boolean, canSearch: boo
 export function readSkillCommand(text: string): { id: SkillResultId; argument: string } | undefined {
   const match = /^\/([a-z][a-z0-9]*)(?:\s+([\s\S]*))?$/i.exec(text.trim());
   const id = match?.[1].toLowerCase();
+  if (id === 'team') return { id: 'about', argument: match?.[2]?.trim() ?? '' };
   if (id === 'tools') return { id: 'skills', argument: '' };
   if (isSkillResultId(id)) return { id, argument: match?.[2]?.trim() ?? '' };
 }
@@ -46,10 +49,15 @@ export function normalizeQuestion(prompt: string) {
 
 // Match direct questions, not quoted text, roleplay, or questions about third parties.
 const identityQuestion = /^(?:who (?:exactly )?are you(?: (?:really|exactly|and (?:what can you do|what(?:'?s| is) your (?:name|website|model))))?|what (?:exactly )?are you|what(?:'?s| is) your (?:(?:real|actual) )?(?:name(?: and (?:website|model))?|model|website|site|domain)|what (?:website|site|app) (?:is this|are you on)|what(?:'?s| is) xyvora(?: ai|\.net)?|what model (?:are you(?: using)?|do you use|powers you)|(?:are|aren't) you (?:chatgpt|openai|claude|gemini|qwen(?: 2\.5)?|xyvora(?: ai)?)(?: or (?:chatgpt|qwen|xyvora(?: ai)?))?|(?:who (?:made|built|created|owns|operates)|where can i find) you|introduce yourself|tell me about yourself)$/i;
+const teamQuestion = /^(?:(?:who (?:made|built|created|designed|developed|founded|runs|owns) (?:you|xyvora(?: ai)?|this app))|who(?:'?s| is) (?:the |your )?(?:founder|designer|coder|creator)(?: (?:of |at )?xyvora(?: ai)?)?|who(?:'?s| is) (?:behind xyvora(?: ai)?|on (?:the )?(?:xyvora|your) team)|(?:tell me about|show me|meet) (?:the )?xyvora team)$/i;
+const memberQuestions = new Set<string>(TEAM.flatMap(({ name }) => {
+  const member = name.toLowerCase();
+  return [`who is ${member}`, `who's ${member}`, `what does ${member} do at xyvora`, `what is ${member}'s role at xyvora`, `what's ${member}'s role at xyvora`];
+}));
 const helpQuestion = /^(?:what can you do|what (?:are your|are the) (?:skills|tools)|how can you help(?: me)?|list your (?:skills|tools)|show (?:me )?your (?:skills|tools))$/i;
 
 export function directInfoSkill(prompt: string): 'about' | 'skills' | undefined {
   if (prompt.length > 120) return;
   const text = normalizeQuestion(prompt).replace(/^please\s+/i, '').replace(/\s+/g, ' ');
-  return identityQuestion.test(text) ? 'about' : helpQuestion.test(text) ? 'skills' : undefined;
+  return (identityQuestion.test(text) || teamQuestion.test(text) || memberQuestions.has(text.toLowerCase())) ? 'about' : helpQuestion.test(text) ? 'skills' : undefined;
 }

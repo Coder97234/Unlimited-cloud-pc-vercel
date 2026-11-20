@@ -1,4 +1,4 @@
-import { DEFAULT_MODE, isReplyMode, MODE_IDS } from '../shared/modes.ts';
+import { DEFAULT_MODE, isReplyMode, modeContext, MODE_IDS } from '../shared/modes.ts';
 import { brandedStream } from '../shared/branding.ts';
 import { ASSISTANT_PROFILE, DEFAULT_MODEL, MAX_ATTACHMENT, MAX_CONTEXT, MAX_MESSAGES, MAX_PROMPT, REPLY_SKILL_HEADER, REPLY_SOURCE_HEADER, withAttachment } from '../shared/models.ts';
 import type { Availability, ChatMessage, ReplySource, TextAttachment } from '../shared/models.ts';
@@ -104,7 +104,7 @@ export function parseChat(input: unknown) {
     }
     query = rawQuery.replace(/\s+/g, ' ').trim();
   }
-  return { messages: cleaned, timeZone, query, mode, ...(attachment && { attachment }) };
+  return { messages: modeContext(cleaned, mode), timeZone, query, mode, ...(attachment && { attachment }) };
 }
 
 // Best-effort limit per function instance; this is not a shared public quota.

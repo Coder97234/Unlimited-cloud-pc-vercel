@@ -2,6 +2,7 @@ import type { ReplyMode } from '../shared/modes.ts';
 
 // Only enabled by the local development server, never by the Vercel function.
 function example(prompt: string, mode: ReplyMode) {
+  if (/recursion/i.test(prompt) && mode === 'instant') return 'Recursion solves a problem by repeatedly solving a smaller version until it reaches a simple stopping point.';
   if (/recursion/i.test(prompt) && mode === 'thinker') return '**The key check:** Can each step solve a smaller version of the same problem? With nesting dolls, opening each doll leaves a smaller one. The smallest doll needs no further step. That stopping rule is what makes the process finish.';
   if (/recursion/i.test(prompt) && mode === 'pro') return '**Base case and recursive step**\n\n\`\`\`js\nconst count = (n) => n <= 0 ? 0 : 1 + count(n - 1);\n\`\`\`\n\nCheck \`count(0) === 0\` and \`count(3) === 3\`. For large inputs, prefer a loop to avoid exhausting the call stack.';
   if (/recursion/i.test(prompt) && mode === 'creative') return 'A little library lives inside a book. On its shelf sits a smaller book with a smaller library, then a tinier book again. At last you open a book with just one word: **stop**. Recursion is the rule that takes you through those smaller doors.';

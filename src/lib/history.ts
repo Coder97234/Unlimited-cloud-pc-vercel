@@ -1,5 +1,5 @@
 import { brandAnswer } from '../../shared/branding.ts';
-import { DEFAULT_MODE, isReplyMode } from '../../shared/modes.ts';
+import { DEFAULT_MODE, INSTANT_HISTORY_CHARS, isReplyMode } from '../../shared/modes.ts';
 import type { ReplyMode } from '../../shared/modes.ts';
 import { DEFAULT_MODEL, MAX_ATTACHMENT, MAX_CONTEXT, MAX_MESSAGES, withAttachment } from '../../shared/models.ts';
 import type { ChatMessage, ReplySource, TextAttachment } from '../../shared/models.ts';
@@ -79,7 +79,7 @@ export function titleForPrompt(prompt: string) {
   return oneLine.length > 47 ? `${oneLine.slice(0, 46).trimEnd()}…` : oneLine;
 }
 
-export function buildMessages(previous: Turn[], current: Pick<Turn, 'prompt' | 'attachment'>): ChatMessage[] {
+export function buildMessages(previous: Turn[], current: Pick<Turn, 'prompt' | 'attachment'>, mode: ReplyMode = DEFAULT_MODE): ChatMessage[] {
   // Current attachments are sent separately so the server routes on the prompt,
   // not on text that happened to be inside an uploaded file.
   const messages: ChatMessage[] = [{ role: 'user', content: current.prompt }];
@@ -89,9 +89,11 @@ export function buildMessages(previous: Turn[], current: Pick<Turn, 'prompt' | '
     if (!answer || answer.model !== DEFAULT_MODEL || answer.source === 'preview' || answer.source === 'legacy' || answer.source === 'skill' || !answer.content.trim() || answer.state !== 'finished') continue;
     const priorInput = withAttachment(turn.prompt, turn.attachment);
     const text = answer.content.slice(0, MAX_CONTEXT);
+    if (mode === 'instant' && priorInput.length + text.length > INSTANT_HISTORY_CHARS) break;
     if (length + priorInput.length + text.length > MAX_CONTEXT || messages.length + 2 > MAX_MESSAGES) break;
     messages.unshift({ role: 'user', content: priorInput }, { role: 'assistant', content: text });
     length += priorInput.length + text.length;
+    if (mode === 'instant') break;
   }
   return messages;
 }
