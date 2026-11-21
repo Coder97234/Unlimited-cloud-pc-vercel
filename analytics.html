@@ -3,12 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="See how many browsers choose to share activity with Xyvora and how often they come back." />
-    <meta name="theme-color" content="#f8f7fb" />
-    <link rel="icon" type="image/png" sizes="64x64" href="/brand/xyvora-icon.png" />
-    <link rel="canonical" href="https://xyvora.net/analytics" />
+    {{PAGE_META}}
     <link rel="stylesheet" href="/src/info.css" />
-    <title>Usage analytics · Xyvora AI</title>
   </head>
   <body class="info-page page-analytics">
     {{INFO_HEADER}}
@@ -25,15 +21,15 @@
         <button class="info-button info-button-secondary" id="refresh-metrics" type="button">Refresh</button>
       </div>
       <noscript><p>Enable JavaScript to load the public report. Analytics collection is off when this page runs without JavaScript.</p></noscript>
-      <dl class="metrics-grid" aria-label="Usage totals">
-        <div class="metric metric-highlight"><dt>Active now</dt><dd id="metric-active">—</dd><dd class="metric-detail">Seen in the past 2 minutes</dd></div>
-        <div class="metric"><dt>Browsers today</dt><dd id="metric-today">—</dd><dd class="metric-detail">Unique browsers, UTC</dd></div>
-        <div class="metric"><dt>Unique browsers</dt><dd id="metric-browsers">—</dd><dd class="metric-detail">Last 30 days</dd></div>
-        <div class="metric"><dt>Returning browsers</dt><dd id="metric-returning">—</dd><dd class="metric-detail" id="returning-rate">2+ days in the last 30</dd></div>
-        <div class="metric"><dt>Registered accounts</dt><dd id="metric-accounts">—</dd><dd class="metric-detail">Current accounts, not visits</dd></div>
+      <dl id="metrics-grid" hidden class="metrics-grid" aria-label="Usage totals">
+        <div class="metric metric-highlight"><dt>Active now</dt><dd id="metric-active"></dd><dd class="metric-detail">Seen in the past 2 minutes</dd></div>
+        <div class="metric"><dt>Browsers today</dt><dd id="metric-today"></dd><dd class="metric-detail">Unique browsers, UTC</dd></div>
+        <div class="metric"><dt>Unique browsers</dt><dd id="metric-browsers"></dd><dd class="metric-detail">Last 30 days</dd></div>
+        <div class="metric"><dt>Returning browsers</dt><dd id="metric-returning"></dd><dd class="metric-detail" id="returning-rate">2+ days in the last 30</dd></div>
+        <div class="metric"><dt>Registered accounts</dt><dd id="metric-accounts"></dd><dd class="metric-detail">Current accounts, not visits</dd></div>
       </dl>
       <div class="metrics-details">
-        <section class="info-card trends" aria-labelledby="trends-title">
+        <section id="metrics-trends" hidden class="info-card trends" aria-labelledby="trends-title">
           <p class="info-eyebrow">LAST 30 UTC DAYS</p>
           <h2 id="trends-title">Daily active browsers</h2>
           <div class="visits-chart" id="visits-chart" aria-hidden="true"></div>
@@ -53,5 +49,6 @@
     </main>
     {{INFO_FOOTER}}
     <script type="module" src="/src/analytics-page.ts"></script>
+    <script type="module" src="/src/site-page.ts"></script>
   </body>
 </html>

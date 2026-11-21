@@ -53,7 +53,7 @@ export async function handleWorkspace(request: Request, config: WorkspaceConfig 
     if (request.headers.get('origin') !== url.origin || request.headers.get('sec-fetch-site') === 'cross-site') throw new ToolError('Open the Xyvora workspace to use tools.', 403);
     if (!/^application\/json(?:;|$)/i.test(request.headers.get('content-type') ?? '')) throw new ToolError('Send JSON data.', 415);
     const photo = url.searchParams.get('input') === 'image';
-    if (photo && (url.origin !== config.origin || !config.image?.vision)) throw new ToolError('Image analysis is not configured on this site.', 503);
+    if (photo && (url.origin !== config.origin || !config.image?.vision)) throw new ToolError('Image analysis is unavailable.', 503);
     let input;
     try { input = asObject(await boundedJson(request, photo ? MAX_VISION_BASE64 + 8_000 : 12_000)); }
     catch (error) { throw error instanceof ToolError ? error : new ToolError('Send a valid JSON tool request.'); }

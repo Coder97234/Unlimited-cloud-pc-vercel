@@ -1,11 +1,14 @@
 import type { AnalyticsReport } from '../shared/analytics.ts';
-import { analyticsEnabled, setAnalytics, startAnalytics } from './lib/analytics.ts';
+import { analyticsEnabled, setAnalytics } from './lib/analytics.ts';
 
 const $ = (id: string) => document.getElementById(id);
 const count = new Intl.NumberFormat();
 const clock = new Intl.DateTimeFormat(undefined, { dateStyle: 'short', timeStyle: 'short' });
 const status = $('metrics-status');
 let reading = false;
+function showMetrics(visible: boolean) {
+  for (const id of ['metrics-grid', 'metrics-trends']) { const node = $(id); if (node) node.hidden = !visible; }
+}
 async function refresh() {
   if (!status || reading) return;
   reading = true;
@@ -15,7 +18,8 @@ async function refresh() {
     const response = await fetch('/api/analytics', { cache: 'no-store', credentials: 'omit', signal: AbortSignal.timeout(8_000) });
     const data = await response.json();
     if (!response.ok || !data.available || !data.report) {
-      status.textContent = data.reason ?? 'The report is temporarily unavailable.';
+      showMetrics(false);
+      status.textContent = 'Usage data is not available right now.';
       status.dataset.state = 'unavailable';
       return;
     }
@@ -41,9 +45,10 @@ async function refresh() {
       });
       chart.replaceChildren(...bars); table.replaceChildren(...rows);
     }
+    showMetrics(true);
     status.dataset.state = 'live';
     status.textContent = `Updated ${clock.format(new Date(report.updatedAt))} · refreshes every 30 seconds`;
-  } catch { status.dataset.state = 'unavailable'; status.textContent = 'The report is temporarily unavailable. Try refreshing.'; }
+  } catch { showMetrics(false); status.dataset.state = 'unavailable'; status.textContent = 'The report is temporarily unavailable. Try refreshing.'; }
   finally { reading = false; if (button) button.disabled = false; }
 }
 $('refresh-metrics')?.addEventListener('click', () => void refresh());
@@ -65,4 +70,3 @@ async function choose(enabled: boolean) {
 }
 accept?.addEventListener('click', () => void choose(true));
 decline?.addEventListener('click', () => void choose(false));
-startAnalytics();

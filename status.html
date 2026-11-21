@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    {{PAGE_META}}
+    <link rel="stylesheet" href="/src/info.css" />
+    <script type="module" src="/src/status-page.ts"></script>
+  </head>
+  <body class="info-page page-status">
+    {{INFO_HEADER}}
+    <main class="info-width info-main" id="content">
+      <section class="info-hero info-hero-single" aria-labelledby="page-title">
+        <div>
+          <p class="info-eyebrow">XYVORA SYSTEMS</p>
+          <h1 id="page-title">Service status<span>.</span></h1>
+          <p class="info-lead">See what this deployment reports. These checks don’t generate a reply or measure historic uptime.</p>
+        </div>
+      </section>
+      <section class="info-section info-card" aria-labelledby="checks-title">
+        <h2 id="checks-title">Current availability</h2>
+        <noscript><p>Enable JavaScript to check current availability.</p></noscript>
+        <div id="service-details" hidden>
+          <dl class="service-list">
+            <div><dt>Chat &amp; text API</dt><dd class="metrics-status" id="service-chat">Checking…</dd></div>
+            <div><dt>Web search</dt><dd class="metrics-status" id="service-search">Checking…</dd></div>
+            <div><dt>Usage report</dt><dd class="metrics-status" id="service-analytics">Checking…</dd></div>
+          </dl>
+          <div class="metrics-toolbar"><p id="service-summary" role="status">Checking services…</p><button type="button" class="info-button" id="refresh-services">Check again</button></div>
+        </div>
+        <div class="info-downloads"><a class="info-button info-button-secondary" href="/developers">Developer API</a><a class="info-button info-button-secondary" href="/">Open chat</a></div>
+      </section>
+    </main>
+    {{INFO_FOOTER}}
+    <script type="module" src="/src/site-page.ts"></script>
+  </body>
+</html>

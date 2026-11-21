@@ -3,24 +3,16 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="{{SITE_DESCRIPTION}}" />
-    <meta property="og:type" content="website" />
-    <meta property="og:title" content="Xyvora AI — {{SITE_SLOGAN}}" />
-    <meta property="og:description" content="{{SITE_DESCRIPTION}}" />
-    <meta property="og:url" content="https://xyvora.net/" />
-    <meta name="theme-color" content="#f8f7fb" />
-    <link rel="icon" type="image/png" sizes="64x64" href="/brand/xyvora-icon.png" />
-    <link rel="canonical" href="https://xyvora.net/" />
-    <title>Xyvora AI · xyvora.net</title>
+    {{PAGE_META}}
   </head>
   <body>
     <noscript>
       <main class="no-script">
         <h1>Xyvora AI</h1>
         <p>{{SITE_DESCRIPTION}}</p>
-        <p><a href="/analytics">Analytics</a> · <a href="/developers">Developer API</a> · <a href="/terms">Terms</a> · <a href="/privacy">Privacy</a> · <a href="/cookies">Cookies</a></p>
-        <p>Chat needs JavaScript. Learn <a href="/about">about Xyvora</a> or read our <a href="/schools">information for schools</a> without it.</p>
+        <p>{{SITE_SLOGAN}} Chat needs JavaScript. You can still explore our public pages.</p>
       </main>
+      {{INFO_FOOTER}}
     </noscript>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>

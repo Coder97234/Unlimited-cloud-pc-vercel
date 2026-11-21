@@ -4,6 +4,8 @@ import { test } from 'node:test';
 import { accountConfig, digest } from '../server/account.ts';
 import { handleAnalytics } from '../server/analytics.ts';
 import { handleJobs } from '../server/jobs.ts';
+import { runQueuedTask } from '../server/job-worker.ts';
+import { workerHeartbeat } from '../server/worker-health.ts';
 import { ACTIVE_MINUTES, REPORT_DAYS } from '../shared/analytics.ts';
 import { JOB_API } from '../shared/jobs.ts';
 import { platformFixture, platformOrigin as origin, platformPost } from './platform-fixture.ts';
@@ -21,7 +23,7 @@ test('optional analytics counts real browser presence, UTC returns and accounts 
   const report = async () => { const response = await api(get()); assert.equal(response.status, 200); assert.equal(response.headers.get('cache-control'), 'no-store'); return (await response.json()).report; };
   const ping = (id: string, options = {}, headers = {}) => api(platformPost(analytics, { id, action: 'ping', consent: true, ...options }, headers));
   const unavailable = await handleAnalytics(get(), origin);
-  assert.deepEqual(await unavailable.json(), { available: false, reason: 'Analytics storage is not configured here.' });
+  assert.deepEqual(await unavailable.json(), { available: false, reason: 'Usage data is not available right now.' });
   assert.equal((await ping(first, { consent: false })).status, 403);
   assert.equal((await ping(first, {}, { 'Sec-GPC': '1' })).status, 403);
   assert.equal((await ping(first, {}, { Origin: 'https://other.invalid' })).status, 403);
@@ -69,14 +71,12 @@ test('background jobs are scoped to verified accounts, finish after the client d
     return { id, headers: headers(id, token) };
   }
   const a = await user('a'.repeat(43)), b = await user('b'.repeat(43));
-  let finish: (() => void) | undefined;
-  const worker: Promise<void>[] = [];
-  const api = (req: Request) => handleJobs(req, config, { generate: async (messages, signal, text, evidence) => {
+  const api = (req: Request) => handleJobs(req, config);
+  const work = () => runQueuedTask(db, origin, { generate: async (messages, _signal, text, evidence) => {
     assert.deepEqual(messages, [{ role: 'user', content: 'Outline a short study plan.' }]);
     assert.equal(evidence.preferences, undefined);
-    await new Promise<void>((resolve, reject) => { finish = resolve; signal.addEventListener('abort', () => reject(signal.reason), { once: true }); });
     text('Study in three short sessions.');
-  } }, (promise) => worker.push(promise));
+  } }, new AbortController().signal);
   const list = (headers?: Record<string, string>) => api(new Request(origin + JOB_API, { headers }));
   const post = (body: object, headers: Record<string, string>, signal?: AbortSignal) => api(platformPost(JOB_API, body, headers, signal));
   const start = { action: 'start', approved: true, prompt: 'Outline a short study plan.', memory: ['Never used.'] };
@@ -84,18 +84,22 @@ test('background jobs are scoped to verified accounts, finish after the client d
   assert.equal((await post(start, { ...a.headers, Origin: 'https://outside.invalid' })).status, 403);
   assert.equal((await post({ ...start, approved: false }, a.headers)).status, 400);
   assert.equal((await post({ ...start, prompt: '/search something' }, a.headers)).status, 400);
+  assert.equal((await post(start, a.headers)).status, 503);
+  await workerHeartbeat(db);
   const client = new AbortController();
   const created = await post(start, a.headers, client.signal);
   assert.equal(created.status, 202);
   assert.equal((await post(start, a.headers)).status, 429);
-  const { id } = await created.json();
+  const { id, state } = await created.json();
+  assert.equal(state, 'queued');
   assert.equal((await list(headers(a.id, 'b'.repeat(43)))).status, 409);
   assert.deepEqual((await (await list(b.headers)).json()).jobs, []);
   assert.equal((await post({ action: 'cancel', id }, b.headers)).status, 404);
   client.abort();
-  assert.ok(finish);
-  finish();
-  await Promise.all(worker);
+  // Mimic a worker dying after it claimed the job. Another worker reclaims
+  // the expired lease instead of depending on the enqueue invocation.
+  await db.query("update xyvora_jobs set state='running', lease=$2, lease_until_ms=0, attempts=1 where id=$1", [id, randomUUID()]);
+  assert.deepEqual((await Promise.all([work(), work()])).sort(), [false, true]);
   const [finished] = (await (await list(a.headers)).json()).jobs;
   assert.equal(finished.state, 'finished');
   assert.equal(finished.result, 'Study in three short sessions.');
@@ -106,7 +110,7 @@ test('background jobs are scoped to verified accounts, finish after the client d
   const waiting = (await another.json()).id;
   assert.equal((await post({ action: 'delete', id: waiting }, b.headers)).status, 404);
   assert.equal((await post({ action: 'cancel', id: waiting }, b.headers)).status, 200);
-  await Promise.all(worker);
+  assert.equal(await work(), false);
   const [cancelled] = (await (await list(b.headers)).json()).jobs;
   assert.equal(cancelled.state, 'cancelled');
   assert.equal(cancelled.result, '');

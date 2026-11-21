@@ -41,7 +41,7 @@ export async function handleAnalytics(request: Request, origin: string, db?: Pla
   const json = (body: object, status = 200) => Response.json(body, { status, headers });
   try {
     if (request.method !== 'GET' && request.method !== 'POST') return Response.json({ error: 'Method not allowed.' }, { status: 405, headers: { ...headers, Allow: 'GET, POST' } });
-    if (!db || new URL(request.url).origin !== origin) return json({ available: false, reason: 'Analytics storage is not configured here.' }, request.method === 'GET' ? 200 : 503);
+    if (!db || new URL(request.url).origin !== origin) return json({ available: false, reason: 'Usage data is not available right now.' }, request.method === 'GET' ? 200 : 503);
     const time = now(), day = Math.floor(time / dayMs);
     if (request.method === 'GET') return json({ available: true, report: await report(db, time) });
     sameOriginJson(request, origin);

@@ -226,3 +226,9 @@ test('retains older replies but sends only completed chat context to new request
     { role: 'user', content: 'Hello' }, { role: 'assistant', content: 'Hi there!' }, { role: 'user', content: 'Next question' },
   ]);
 });
+
+
+test('a finish reason without the completion sentinel does not confirm a stream', async () => {
+  const body = new Response('data: {"choices":[{"delta":{"content":"partial"},"finish_reason":"stop"}]}\n\n').body!;
+  await assert.rejects(readChatEvents(body, () => {}), /before the reply finished/);
+});

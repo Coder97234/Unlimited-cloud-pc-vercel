@@ -6,7 +6,7 @@ import { asObject, providerJson, ToolError } from './workspace-http.ts';
 
 function access(request: Request, config: WorkspaceConfig, code: unknown, vision = false) {
   if (!config.image || new URL(request.url).origin !== config.origin || (vision && !config.image.vision)) throw new ToolError(vision
-    ? 'Image analysis is not configured on this site.' : 'Hosted image generation is not set up on this site. Local graphics are available.', 503);
+    ? 'Image analysis is unavailable.' : 'Hosted image generation is unavailable. You can still make local graphics.', 503);
   if (typeof code !== 'string' || code.length > 180 || !equalSecret(code, config.image.accessCode)) throw new ToolError('A valid studio access code is required.', 403);
   return { Authorization: `Bearer ${config.image.key}`, 'Content-Type': 'application/json' };
 }

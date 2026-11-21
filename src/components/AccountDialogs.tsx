@@ -1,10 +1,10 @@
 import { ArrowUpRight, Brain, LogOut, Plus, ShieldCheck, Trash2, UserRound } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { ACCOUNT_PROVIDERS } from '../../shared/account.ts';
-import type { AccountStatus } from '../../shared/account.ts';
-import { MAX_MEMORY_CHARS, MAX_MEMORY_NOTE, MAX_MEMORY_NOTES, parseMemory, parseMemoryNotes } from '../../shared/memory.ts';
+import type { AccountLink, AccountStatus } from '../../shared/account.ts';
+import { MAX_ACCOUNT_MEMORY_CHARS, MAX_ACCOUNT_MEMORY_NOTES, MAX_MEMORY_CHARS, MAX_MEMORY_NOTE, MAX_MEMORY_NOTES, parseMemory, parseMemoryNotes } from '../../shared/memory.ts';
 import type { MemoryProfile } from '../../shared/memory.ts';
-import { deleteAccount, passwordSignIn, saveMemory, signOut, startSignIn } from '../lib/account.ts';
+import { deleteAccount, finishAccountLink, passwordSignIn, requestAccountLink, saveMemory, signOut, startSignIn } from '../lib/account.ts';
 import { Dialog } from './Dialog.tsx';
 
 function useAction() {
@@ -20,28 +20,32 @@ function useAction() {
     catch (error) { if (!controller.signal.aborted) setError(error instanceof Error ? error.message : 'The action did not complete.'); }
     finally { ref.current = null; if (!controller.signal.aborted) setBusy(false); }
   }
-  return { busy, error, run };
+  return { busy, error, run, clear: () => setError('') };
 }
 
-export function AccountDialog({ account, error, onRetry, onClose, onMemory }: {
-  account: AccountStatus; error?: string; onRetry: () => void; onClose: () => void; onMemory: () => void;
+export function AccountDialog({ account, error, unsynced, openSignIn, onRetry, onClose, onMemory }: {
+  account: AccountStatus; error?: string; unsynced: boolean; openSignIn: boolean; onRetry: () => void; onClose: () => void; onMemory: () => void;
 }) {
   const task = useAction();
-  const [register, setRegister] = useState(false);
+  const [view, setView] = useState<'login' | 'signup' | 'reset'>(openSignIn ? 'login' : account.passwords ? 'login' : 'signup');
+  const [sent, setSent] = useState(false);
+  const [email, setEmail] = useState('');
+  function show(next: typeof view) { setView(next); setSent(false); task.clear(); }
   const [remove, setRemove] = useState(false);
-  return <Dialog title={account.user ? 'Your Xyvora account' : 'Sign in or create an account'}
+  return <Dialog title={account.user ? 'Your Xyvora account' : view === 'reset' ? 'Reset your password' : account.passwords || account.providers.length ? 'Sign in or create an account' : 'Guest workspace'}
     subtitle="Accounts are optional. You can keep using chat as a guest." onClose={() => { if (!task.busy) onClose(); }}>
     {account.user ? <>
       <div className="identity-card"><span className="plugin-icon tint-violet"><UserRound size={20} /></span><div>
         <strong>{account.user.name || 'Signed in'}</strong>{account.user.email && <p>{account.user.email}</p>}
       </div></div>
-      <p className="form-hint">Your account syncs saved memory notes. Chats are kept separately for each workspace in this browser; they don’t sync or get erased when you sign out.</p>
+      <p className="form-hint">Saved chats, workspace settings, and memory sync across devices signed in to this account. Guest and Temporary chats are not synced.</p>
+      {unsynced && <p className="plugin-notice"><ShieldCheck size={16} /> Some chats haven’t synced yet. Wait for sync or export them before signing out.</p>}
       <div className="dialog-actions account-actions">
         <button type="button" className="secondary-button" onClick={onMemory} disabled={task.busy}><Brain size={15} /> Manage memory</button>
         <button type="button" className="secondary-button" onClick={() => void task.run((signal) => signOut(account.user!.id, signal))} disabled={task.busy}><LogOut size={15} /> Sign out</button>
         <button type="button" className="text-button" disabled={task.busy} onClick={() => setRemove(!remove)} aria-expanded={remove}>Delete account</button>
       </div>
-      {remove && <div className="confirm-box"><p>Delete your Xyvora account, synced notes, background tasks, and all sessions? This also clears this account’s chats in this browser, but not browser storage on other devices. This can’t be undone.</p>
+      {remove && <div className="confirm-box"><p>Delete your Xyvora account, saved chats, settings, notes, background tasks, and all sessions? Previously exported files aren’t affected. This can’t be undone.</p>
         <div><button type="button" className="secondary-button" disabled={task.busy} onClick={() => setRemove(false)}>Cancel</button>
           <button type="button" className="danger-button" disabled={task.busy} onClick={() => void task.run((signal) => deleteAccount(account.user!.id, signal))}><Trash2 size={15} /> Delete permanently</button></div>
       </div>}
@@ -56,21 +60,60 @@ export function AccountDialog({ account, error, onRetry, onClose, onMemory }: {
           </button>)}
         </div>
       </>}
-      {account.passwords && <form className="plugin-fields password-form" onSubmit={(event) => {
-        event.preventDefault();
-        const fields = new FormData(event.currentTarget);
-        void task.run((signal) => passwordSignIn(String(fields.get('username')), String(fields.get('password')), register, signal));
-      }}>
-        <label className="field-label">Username<input className="plugin-input" name="username" autoComplete="username" autoCapitalize="none" spellCheck={false} minLength={3} maxLength={24} pattern="[A-Za-z0-9][A-Za-z0-9_\-]{2,23}" required disabled={task.busy} /></label>
-        <label className="field-label">Password<input className="plugin-input" name="password" type="password" autoComplete={register ? 'new-password' : 'current-password'} minLength={12} maxLength={128} required disabled={task.busy} /></label>
-        {register && <p className="form-hint">Choose 3–24 letters, numbers, underscores, or dashes for your username and at least 12 characters for your password. Password recovery is not available.</p>}
-        <div className="dialog-actions"><button type="button" className="text-button" disabled={task.busy} onClick={() => setRegister(!register)}>{register ? 'Use an existing account' : 'Create an account'}</button>
-          <button type="submit" className="plugin-primary" disabled={task.busy}>{task.busy ? 'Working…' : register ? 'Create Xyvora account' : 'Sign in with password'}</button></div>
-      </form>}
+      {account.passwords && <>
+        {view !== 'reset' && <div className="theme-options auth-tabs" aria-label="Account action">
+          <button type="button" className="theme-choice" aria-pressed={view === 'login'} disabled={task.busy} onClick={() => show('login')}>Sign in</button>
+          <button type="button" className="theme-choice" aria-pressed={view === 'signup'} disabled={task.busy} onClick={() => show('signup')}>Sign up</button>
+        </div>}
+        {sent ? <div className="confirm-box" role="status">
+          <p>{view === 'signup' ? 'If this address can be used to sign up, we’ll email a link to verify it and set your password.' : 'If this address has a password account, we’ll email a reset link.'} The link is valid for 30 minutes.</p>
+          <button type="button" className="secondary-button" onClick={() => show('login')}>Back to sign in</button>
+        </div> : <form className="plugin-fields password-form" key={view} onSubmit={(event) => {
+          event.preventDefault();
+          const fields = new FormData(event.currentTarget);
+          void task.run(async (signal) => {
+            if (view === 'login') await passwordSignIn(email, String(fields.get('password') ?? ''), signal);
+            else { await requestAccountLink(view === 'signup' ? 'request-signup' : 'request-reset', email, signal); signal.throwIfAborted(); setSent(true); }
+          });
+        }}>
+          <label className="field-label">Email<input className="plugin-input" name="email" type={view === 'login' ? 'text' : 'email'} inputMode="email" value={email}
+            onChange={({ target }) => setEmail(target.value)} autoComplete={view === 'login' ? 'username' : 'email'} autoCapitalize="none" spellCheck={false} maxLength={254} required disabled={task.busy} /></label>
+          {view === 'login' && <label className="field-label">Password<input className="plugin-input" name="password" type="password" autoComplete="current-password" maxLength={128} required disabled={task.busy} /></label>}
+          {view === 'signup' && <p className="form-hint">We’ll send you a link to verify your email and choose a password.</p>}
+          <div className="dialog-actions">
+            {view !== 'signup' && <button type="button" className="text-button" disabled={task.busy} onClick={() => show(view === 'reset' ? 'login' : 'reset')}>{view === 'reset' ? 'Back to sign in' : 'Forgot password?'}</button>}
+            <button type="submit" className="plugin-primary" disabled={task.busy}>{task.busy ? 'Working…' : view === 'login' ? 'Sign in with password' : view === 'signup' ? 'Email verification link' : 'Email reset link'}</button>
+          </div>
+        </form>}
+      </>}
       <p className="form-hint">By creating an account, you agree to the <a href="/terms">Terms of Use</a>. Read the <a href="/privacy">Privacy Policy</a>.</p>
-    </> : <p className="plugin-notice"><ShieldCheck size={16} /> {error || 'Sign-in is not configured on this deployment. Guest chat and on-device memory still work.'}</p>}
+    </> : <p className="plugin-notice"><ShieldCheck size={16} /> {error || 'You can use chat, files, and on-device memory as a guest.'}</p>}
     {error && !account.user && <div className="dialog-actions"><button type="button" className="secondary-button" onClick={onRetry}>Check sign-in again</button></div>}
     {task.error && <p className="plugin-error" role="alert">{task.error}</p>}
+  </Dialog>;
+}
+
+export function PasswordLinkDialog({ link, onClose }: { link: AccountLink; onClose: () => void }) {
+  const task = useAction();
+  const [mismatch, setMismatch] = useState(false);
+  const signup = link.purpose === 'signup';
+  return <Dialog title={signup ? 'Set your Xyvora password' : 'Choose a new password'}
+    subtitle={signup ? 'Complete your account setup.' : 'Resetting a password signs out the other sessions for that account.'}
+    onClose={() => { if (!task.busy) onClose(); }}>
+    <form className="plugin-fields" onSubmit={(event) => {
+      event.preventDefault();
+      const fields = new FormData(event.currentTarget);
+      const password = String(fields.get('password') ?? '');
+      if (password !== fields.get('confirm')) { setMismatch(true); task.clear(); return; }
+      setMismatch(false);
+      void task.run((signal) => finishAccountLink(link, password, signal));
+    }}>
+      <label className="field-label">New password<input className="plugin-input" autoComplete="new-password" type="password" name="password" minLength={12} maxLength={128} required disabled={task.busy} /></label>
+      <label className="field-label">Confirm password<input className="plugin-input" autoComplete="new-password" type="password" name="confirm" minLength={12} maxLength={128} required disabled={task.busy} /></label>
+      <p className="form-hint">Use 12–128 characters.</p>
+      {(mismatch || task.error) && <p className="plugin-error" role="alert">{mismatch ? 'The two passwords don’t match.' : task.error}</p>}
+      <div className="dialog-actions"><button type="submit" className="plugin-primary" disabled={task.busy}>{signup ? 'Create account' : 'Save new password'}</button></div>
+    </form>
   </Dialog>;
 }
 
@@ -78,13 +121,15 @@ export function MemoryDialog({ profile, accountId, error, initial, onSave, onRel
   profile?: MemoryProfile; accountId?: string; error?: string; initial?: string; onSave: (profile: MemoryProfile) => void; onReload: () => void; onClose: () => void;
 }) {
   const task = useAction();
+  const maxNotes = accountId ? MAX_ACCOUNT_MEMORY_NOTES : MAX_MEMORY_NOTES;
+  const maxChars = accountId ? MAX_ACCOUNT_MEMORY_CHARS : MAX_MEMORY_CHARS;
   const [enabled, setEnabled] = useState(profile?.enabled ?? false);
   const [notes, setNotes] = useState(() => {
     const items = profile?.notes ?? [];
-    return initial && items.length < MAX_MEMORY_NOTES ? [...items, initial] : items;
+    return initial && items.length < maxNotes ? [...items, initial] : items;
   });
-  const validated = parseMemory({ enabled, notes });
-  return <Dialog title="Memory" subtitle={accountId ? 'Your notes sync with this Xyvora account.' : 'Guest notes are stored in this browser only.'} onClose={() => { if (!task.busy) onClose(); }}>
+  const validated = parseMemory({ enabled, notes }, !!accountId);
+  return <Dialog title="Memory" subtitle={accountId ? 'Your notes sync across devices. Replies use a bounded selection of recent notes.' : 'Guest notes are stored in this browser only.'} onClose={() => { if (!task.busy) onClose(); }}>
     {!profile ? <>
       <p className="plugin-notice" role="status"><Brain size={16} /> {error || 'Loading account memory…'}</p>
       {error && <div className="dialog-actions"><button type="button" className="secondary-button" onClick={onReload}>Retry</button></div>}
@@ -98,7 +143,7 @@ export function MemoryDialog({ profile, accountId, error, initial, onSave, onRel
     }}>
       <p className="plugin-notice"><ShieldCheck size={17} /> You decide what to save. Enabled notes can be used in ordinary replies, not Temporary Chat, This message only, image analysis, or explicit translation. Avoid secrets or sensitive details.</p>
       <label className="memory-toggle"><input type="checkbox" checked={enabled} disabled={task.busy} onChange={({ target }) => setEnabled(target.checked)} /> Use saved notes in replies</label>
-      {initial && profile.notes.length >= MAX_MEMORY_NOTES && <p className="form-hint">Remove an existing note before adding another.</p>}
+      {initial && profile.notes.length >= maxNotes && <p className="form-hint">Remove an existing note before adding another.</p>}
       {notes.map((note, index) => <div className="memory-row" key={index}>
         <input className="plugin-input" aria-label={`Memory note ${index + 1}`} data-dialog-focus={initial && index === notes.length - 1 || undefined} value={note}
           maxLength={MAX_MEMORY_NOTE} disabled={task.busy} placeholder="Example: Prefer concise explanations."
@@ -106,11 +151,11 @@ export function MemoryDialog({ profile, accountId, error, initial, onSave, onRel
         <button type="button" className="icon-button" aria-label={`Remove memory note ${index + 1}`} disabled={task.busy}
           onClick={() => setNotes((current) => current.filter((_, i) => i !== index))}><Trash2 size={16} /></button>
       </div>)}
-      {!parseMemoryNotes(notes) && <p className="plugin-error" role="alert">Keep notes to {MAX_MEMORY_CHARS.toLocaleString()} characters total, without control characters.</p>}
+      {!parseMemoryNotes(notes, !!accountId) && <p className="plugin-error" role="alert">Keep notes to {maxChars.toLocaleString()} characters total, without control characters.</p>}
       <div className="memory-tools">
-        <button type="button" className="secondary-button" onClick={() => setNotes((items) => [...items, ''])} disabled={task.busy || notes.length >= MAX_MEMORY_NOTES}><Plus size={15} /> Add note</button>
+        <button type="button" className="secondary-button" onClick={() => setNotes((items) => [...items, ''])} disabled={task.busy || notes.length >= maxNotes}><Plus size={15} /> Add note</button>
         {notes.length > 0 && <button type="button" className="text-button" disabled={task.busy} onClick={() => { setNotes([]); setEnabled(false); }}>Clear notes</button>}
-        <span className="form-hint">{notes.length} / {MAX_MEMORY_NOTES} notes</span>
+        <span className="form-hint">{notes.length} / {maxNotes} notes</span>
       </div>
       {task.error && <p className="plugin-error" role="alert">{task.error}</p>}
       <div className="dialog-actions">

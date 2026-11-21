@@ -100,7 +100,7 @@ function ApiExplorer({ initial, onInsert }: { initial?: string; onInsert: (value
 const sizeLabels = { '1024x1024': 'Square · 1024 × 1024', '1536x1024': 'Landscape · 1536 × 1024', '1024x1536': 'Portrait · 1024 × 1536' };
 type StudioMode = 'local' | 'hosted' | 'vision';
 
-function ImageStudio({ initial, status, statusError, onChoosePhoto }: { initial?: string; status?: WorkspaceStatus; statusError: string; onChoosePhoto: () => void }) {
+function ImageStudio({ initial, status, onChoosePhoto }: { initial?: string; status?: WorkspaceStatus; onChoosePhoto: () => void }) {
   const [prompt, setPrompt] = useState((initial || 'A violet sky with a mint aurora').slice(0, 1_200));
   const [caption, setCaption] = useState('');
   const [style, setStyle] = useState<ArtStyle>(() => /mountain|hill|landscape|ridge/i.test(initial ?? '') ? 'Terrain' : /planet|orbit|space/i.test(initial ?? '') ? 'Orbit' : 'Aurora');
@@ -112,22 +112,20 @@ function ImageStudio({ initial, status, statusError, onChoosePhoto }: { initial?
   const hosted = status?.hostedImages === true;
   const task = useOperation();
   const switchTo = (tab: StudioMode) => { setSelection(tab); setCode(''); };
-  const statusText = (name: string, enabled: boolean | undefined, description: string) => enabled ? description
-    : statusError || (status ? `${name} isn’t configured on this deployment. Local graphics still work.` : `Checking ${name.toLowerCase()} availability…`);
   useEffect(() => () => { if (image) URL.revokeObjectURL(image.url); }, [image]);
   return <div className="plugin-fields">
     <div className="studio-tabs" aria-label="Image Studio tools">
       <button type="button" aria-pressed={mode === 'local'} disabled={task.busy} onClick={() => switchTo('local')}>Local graphics</button>
-      <button type="button" aria-pressed={mode === 'hosted'} disabled={task.busy} onClick={() => switchTo('hosted')}>AI images</button>
-      <button type="button" aria-pressed={mode === 'vision'} disabled={task.busy} onClick={() => switchTo('vision')}>Analyze image</button>
+      {hosted && <button type="button" aria-pressed={mode === 'hosted'} disabled={task.busy} onClick={() => switchTo('hosted')}>AI images</button>}
+      {status?.hostedVision && <button type="button" aria-pressed={mode === 'vision'} disabled={task.busy} onClick={() => switchTo('vision')}>Analyze image</button>}
     </div>
     {mode === 'vision' ? <>
-      <p className="plugin-notice"><ShieldCheck size={17} /> {statusText('Image analysis', status?.hostedVision, 'Ask about a photo, diagram, or screenshot. Review and approve before its resized image and question go to OpenAI.')}</p>
+      <p className="plugin-notice"><ShieldCheck size={17} /> Ask about a photo, diagram, or screenshot. Review and approve before its resized image and question go to OpenAI.</p>
       <p className="form-hint">One JPEG, PNG, or WebP up to 8 MB. Your image is not saved in chat. A studio access code is required.</p>
       <div className="plugin-run-row"><button type="button" className="plugin-primary" disabled={!status?.hostedVision} onClick={onChoosePhoto}><Image size={16} /> Attach image to chat</button></div>
     </> : <>
       {mode === 'local' ? <p className="plugin-notice"><ShieldCheck size={17} /> A 4K poster generator. Your words set the colors and pattern for abstract art, not a rendered scene. Nothing is uploaded.</p>
-        : <p className="plugin-notice"><ShieldCheck size={17} /> {statusText('Hosted AI images', hosted, 'Approval sends only this prompt and image size to OpenAI and can use the owner’s image credits.')}</p>}
+        : <p className="plugin-notice"><ShieldCheck size={17} /> Approval sends only this prompt and image size to OpenAI and can use the owner’s image credits.</p>}
       <label className="field-label">{mode === 'local' ? 'Describe a mood or color palette' : 'Image prompt'}<textarea data-dialog-focus className="plugin-input" value={prompt}
         onChange={(event) => setPrompt(event.target.value)} maxLength={1_200} rows={3} disabled={task.busy} /></label>
       {mode === 'local' ? <div className="studio-options">
@@ -180,8 +178,7 @@ function AccountPanel({ provider, status, change }: { provider: Provider; status
   return <div className="plugin-fields">
     <p className="plugin-notice"><ShieldCheck size={17} /> {PLUGINS[provider].summary} Results aren’t sent to the assistant or saved in chat. Connections expire within an hour.</p>
     <div className="account-status"><span className={`connection-dot${status === 'connected' ? ' connected' : ''}`} />
-      {status === 'connected' ? 'Connected on this browser' : status === 'disconnected' ? 'Not connected' : status === 'unconfigured' ? 'Connection not configured on this deployment' : 'Checking connection…'}</div>
-    {status === 'unconfigured' && <p className="form-hint">The site owner needs to register a {name} OAuth app first. This requires separate consent; no account password or personal token is needed.</p>}
+      {status === 'connected' ? 'Connected on this browser' : status === 'disconnected' ? 'Not connected' : 'Checking connection…'}</div>
     {status === 'disconnected' && <><p className="form-hint">You’ll leave Xyvora to approve the connection. Finish any unsent draft first.</p><div className="plugin-run-row"><button className="plugin-primary" type="button" disabled={task.busy} onClick={() => void task.begin(async (signal) => {
       const { url } = await approveTool<{ url: string }>({ action: 'connect', provider }, signal);
       const auth = new URL(url);
@@ -208,9 +205,11 @@ function AccountPanel({ provider, status, change }: { provider: Provider; status
 }
 
 export function PluginsDialog({ intent, textInput, onInsert, onChoosePhoto, repoDraft, onRepoFile, onClose }: { intent?: PluginIntent; textInput?: string; onInsert: (text: string) => void; onChoosePhoto: () => void; repoDraft?: RepoWorkbenchDraft; onRepoFile: (attachment: TextAttachment, draft: RepoWorkbenchDraft) => void; onClose: () => void }) {
-  const [id, setId] = useState(intent?.id);
+  const [selected, setId] = useState(intent?.id);
   const [status, setStatus] = useState<WorkspaceStatus>();
   const [error, setError] = useState('');
+  const enabled = (key: PluginId) => key !== 'gmail' && key !== 'vercel' || ['connected', 'disconnected'].includes(status?.connections[key] ?? '');
+  const id = selected && enabled(selected) ? selected : undefined;
   useEffect(() => {
     const controller = new AbortController();
     getWorkspace(controller.signal).then((value) => { if (!controller.signal.aborted) setStatus(value); }).catch((error: Error) => {
@@ -218,19 +217,19 @@ export function PluginsDialog({ intent, textInput, onInsert, onChoosePhoto, repo
     });
     return () => controller.abort();
   }, []);
-  return <Dialog title={id ? PLUGINS[id].name : 'Plugins'} subtitle={id ? PLUGINS[id].summary : 'Work with files, make images, run a script, or connect your accounts.'} className="plugins-dialog" onClose={onClose}>
+  return <Dialog title={id ? PLUGINS[id].name : 'Plugins'} subtitle={id ? PLUGINS[id].summary : 'Work with files, create graphics, run a script, or explore public APIs.'} className="plugins-dialog" onClose={onClose}>
     {id && <button type="button" className="plugin-back" onClick={() => setId(undefined)}><ArrowLeft size={16} /> All plugins</button>}
     {error && id !== 'script' && id !== 'image' && <ErrorNotice message={error} />}
     {!id && <>
       <p className="plugin-notice"><ShieldCheck size={17} /> Built-in chat tools run on request. Plugins review scripts and external calls with you first.</p>
       <div className="plugin-grid">
-        {all.map((key) => {
+        {all.filter(enabled).map((key) => {
           const Icon = icons[key];
           const connection = key === 'gmail' || key === 'vercel' ? status?.connections[key] : undefined;
           return <button type="button" className="plugin-card" key={key} onClick={() => setId(key)}>
             <span className={`plugin-icon tint-${tints[key]}`}><Icon size={20} /></span><ArrowUpRight size={15} className="plugin-arrow" />
             <strong>{PLUGINS[key].name}</strong><span className="plugin-card-text">{PLUGINS[key].summary}</span>
-            <span className="plugin-label">{key === 'image' && (status?.hostedImages || status?.hostedVision) ? 'Local + hosted' : connection === 'connected' ? 'Connected · read-only' : connection === 'unconfigured' ? 'Needs setup' : labels[key]}</span>
+            <span className="plugin-label">{key === 'image' && (status?.hostedImages || status?.hostedVision) ? 'Local + hosted' : connection === 'connected' ? 'Connected · read-only' : labels[key]}</span>
           </button>;
         })}
       </div>
@@ -238,7 +237,7 @@ export function PluginsDialog({ intent, textInput, onInsert, onChoosePhoto, repo
     {id === 'script' && <ScriptLab initial={intent?.id === id ? intent.input ?? '' : undefined} textInput={textInput} onInsert={onInsert} />}
     {id === 'repo' && <RepositoryWorkbench initial={intent?.id === id ? intent.input : undefined} workingCopy={repoDraft} onAttach={onRepoFile} />}
     {id === 'api' && <ApiExplorer initial={intent?.id === id ? intent.input : undefined} onInsert={onInsert} />}
-    {id === 'image' && <ImageStudio initial={intent?.id === id ? intent.input : undefined} status={status} statusError={error} onChoosePhoto={onChoosePhoto} />}
+    {id === 'image' && <ImageStudio initial={intent?.id === id ? intent.input : undefined} status={status} onChoosePhoto={onChoosePhoto} />}
     {(id === 'gmail' || id === 'vercel') && <AccountPanel key={id} provider={id} status={status?.connections[id]}
       change={(connection) => setStatus((value) => value ? { ...value, connections: { ...value.connections, [id]: connection } } : value)} />}
   </Dialog>;

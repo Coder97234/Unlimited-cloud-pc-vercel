@@ -20,6 +20,7 @@ type Props = {
   textarea: RefObject<HTMLTextAreaElement | null>;
   files: LocalFile[];
   photo?: VisionPhoto;
+  canAnalyze: boolean;
   onRemovePhoto: () => void;
   filePicker: RefObject<HTMLInputElement | null>;
   checking: boolean;
@@ -38,7 +39,7 @@ type Props = {
   isolated: boolean;
 };
 
-export function Composer({ draft, onDraft, textarea, files, photo, onRemovePhoto, filePicker, checking, usesMemory, onAttach, onRemoveFile, readingFiles, mode, onMode, onSend, onStop, webSearch, canSearch, onToggleSearch, busy, isolated }: Props) {
+export function Composer({ draft, onDraft, textarea, files, photo, canAnalyze, onRemovePhoto, filePicker, checking, usesMemory, onAttach, onRemoveFile, readingFiles, mode, onMode, onSend, onStop, webSearch, canSearch, onToggleSearch, busy, isolated }: Props) {
   const searchEnabled = allowsSearchToggle(draft);
   const explicit = explicitSearchQuery(draft) !== undefined;
   const query = photo ? undefined : chatSearchQuery(draft, webSearch);
@@ -46,7 +47,7 @@ export function Composer({ draft, onDraft, textarea, files, photo, onRemovePhoto
   const ModeIcon = MODE_ICONS[mode];
   const [dropping, setDropping] = useState(false);
   const limit = photo ? MAX_VISION_QUESTION : MAX_PROMPT;
-  const canSend = !checking && !readingFiles && !!draft.trim() && draft.trim().length <= limit && !searchTooLong && (query === undefined || !!query.trim());
+  const canSend = (!photo || canAnalyze) && !checking && !readingFiles && !!draft.trim() && draft.trim().length <= limit && !searchTooLong && (query === undefined || !!query.trim());
   const photoUrl = usePhotoUrl(photo?.blob);
   const attachEnabled = !checking && !busy && !readingFiles && !photo && files.length < MAX_FILES;
   const mascot = useRef<HTMLSpanElement>(null);
@@ -81,13 +82,17 @@ export function Composer({ draft, onDraft, textarea, files, photo, onRemovePhoto
       if (!images.length || event.clipboardData.getData('text/plain')) return;
       event.preventDefault(); if (attachEnabled) onAttach(images);
     }}>
+    {dropping && <div className="file-drop-hint" aria-live="polite"><Paperclip size={15} /> Drop images, PDFs, or text and code files</div>}
     {(files.length > 0 || photo || readingFiles) && <div className="attachment-list" aria-label="Attachments">
-      {files.map((file) => <div className="attachment-chip" key={file.id} title={file.truncated ? `${file.name} (excerpt)` : file.name}>
-        <Paperclip size={14} /><span>{file.name}</span>{file.truncated && <small>Excerpt</small>}
+      {files.map((file) => <div className="file-card" key={file.id}>
+        <details>
+          <summary title={file.name}><Paperclip size={14} /><span>{file.name}</span><small>{file.name.toLowerCase().endsWith('.pdf') ? 'PDF' : 'Text'} preview</small></summary>
+          <pre className="attachment-excerpt" aria-label={`${file.name} preview`} tabIndex={0}>{file.text.slice(0, 900)}{(file.truncated || file.text.length > 900) && '\n… (excerpt)'}</pre>
+        </details>
         <button type="button" className="bare-icon" onClick={() => onRemoveFile(file.id)} aria-label={`Remove ${file.name}`} disabled={busy || readingFiles}><X size={14} /></button>
       </div>)}
       {photo && <div className="attachment-chip photo-chip" title={photo.name}>
-        {photoUrl ? <img src={photoUrl} alt="" /> : <Image size={15} />}<span>{photo.name}</span><small>Image</small>
+        {photoUrl ? <img src={photoUrl} alt={`Preview of ${photo.name}`} /> : <Image size={15} />}<span>{photo.name}</span><small>{canAnalyze ? 'Image' : 'On this device'}</small>
         <button type="button" className="bare-icon" onClick={onRemovePhoto} aria-label={`Remove ${photo.name}`} disabled={busy}><X size={14} /></button>
       </div>}
       {readingFiles && <span className="attachment-chip" role="status"><LoaderCircle className="file-spinner" size={14} />Preparing attachment…</span>}
@@ -96,7 +101,7 @@ export function Composer({ draft, onDraft, textarea, files, photo, onRemovePhoto
       <Mascot className="composer-mark" motionRef={mascot} />
       <textarea
         ref={textarea} value={draft} disabled={checking || (!!photo && busy)} maxLength={limit} rows={2}
-        placeholder={photo ? 'Ask about this image…' : webSearch ? 'What should I look up?…' : 'Ask Xyvora AI anything…'} aria-label="Message Xyvora"
+        placeholder={photo ? canAnalyze ? 'Ask about this image…' : 'Remove the image to send a text message…' : webSearch ? 'What should I look up?…' : 'Ask Xyvora AI anything…'} aria-label="Message Xyvora"
         aria-describedby={photo ? 'vision-disclosure' : query !== undefined && canSearch ? 'search-disclosure' : undefined}
         onChange={(event) => {
           const field = event.currentTarget;
@@ -124,7 +129,7 @@ export function Composer({ draft, onDraft, textarea, files, photo, onRemovePhoto
       <div className="composer-tools">
         <input type="file" ref={filePicker} hidden multiple accept={`${ACCEPTED_FILES},${IMAGE_FILE_ACCEPT}`} onChange={attach} />
         <button type="button" className="attach-button" title="Attach documents or an image" aria-label="Attach files" disabled={!attachEnabled} onClick={() => filePicker.current?.click()}><Plus size={19} /></button>
-        {photo ? <span className="vision-mode"><Image size={15} /> Image analysis</span> : <>
+        {photo ? <span className="vision-mode"><Image size={15} /> {canAnalyze ? 'Image analysis' : 'Image preview'}</span> : <>
           <button type="button" className="mode-chip" title={MODES[mode].description} aria-label={`Reply mode: ${MODES[mode].name}`} aria-haspopup="dialog" onClick={onMode} disabled={busy}>
             <ModeIcon size={15} /><span>{MODES[mode].name}</span><ChevronDown size={13} />
           </button>
@@ -142,7 +147,7 @@ export function Composer({ draft, onDraft, textarea, files, photo, onRemovePhoto
     </div>
     {isolated && <p className="context-disclosure"><ShieldCheck size={13} /> This message only · Earlier exchanges and saved memory aren’t included.</p>}
     {usesMemory && !photo && <p className="context-disclosure"><Brain size={13} /> Saved memory can be used for this reply.</p>}
-    {photo && <p id="vision-disclosure" className="search-disclosure">{draft.trim().length > limit ? `Keep your question to ${limit} characters.` : 'Review before sending the image and question to OpenAI. No prior chat or memory is sent.'}</p>}
+    {photo && <p id="vision-disclosure" className="search-disclosure">{!canAnalyze ? 'This is a local preview. Remove the image to send a text message.' : draft.trim().length > limit ? `Keep your question to ${limit} characters.` : 'Review before sending the image and question to OpenAI. No prior chat or memory is sent.'}</p>}
     {files.length > 0 && <p className="search-disclosure">Only extracted text is included when you ask Xyvora about a file. Long files are excerpted.</p>}
     {query !== undefined && canSearch && <p id="search-disclosure" className="search-disclosure">
       {searchTooLong ? `Keep search queries to ${MAX_SEARCH_QUERY} characters.` : `Only your search query goes to Wiby and Wikipedia, not your attachments or chat history. Don’t include private information.`}

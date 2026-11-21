@@ -14,7 +14,6 @@ export async function readChatEvents(body: ReadableStream<Uint8Array>, onText: (
   const decoder = new TextDecoder();
   let buffer = '';
   let ended = false;
-  let finish = false;
   const consume = (raw: string) => {
     const data = raw.split(/\r?\n/).filter((line) => line.startsWith('data:')).map((line) => line.slice(5).trimStart()).join('\n');
     if (!data) return;
@@ -28,7 +27,6 @@ export async function readChatEvents(body: ReadableStream<Uint8Array>, onText: (
       throw new ChatError(showServerError && typeof message === 'string' ? message : 'Xyvora couldn’t finish the reply. Try again.');
     }
     if (Array.isArray(payload?.sources)) onSources?.(normalizeSources(payload.sources));
-    if (choice?.finish_reason) finish = true;
     if (typeof choice?.delta?.content === 'string') onText(choice.delta.content);
   };
   try {
@@ -43,7 +41,7 @@ export async function readChatEvents(body: ReadableStream<Uint8Array>, onText: (
       }
       if (buffer.length > 100_000) throw new ChatError('Xyvora sent an unreadable response. Try again.');
     }
-    if (!ended && !finish) throw new ChatError('The connection ended before the reply finished. You can try again.');
+    if (!ended) throw new ChatError('The connection ended before the reply finished. You can try again.');
   } finally {
     await reader.cancel().catch(() => undefined);
     reader.releaseLock();
@@ -61,7 +59,7 @@ export async function streamChat(messages: ChatMessage[], signal: AbortSignal, o
 }) {
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const response = await fetch('/api/chat', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    method: 'POST', credentials: 'omit', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ model: DEFAULT_MODEL, mode: options.mode, messages, timeZone, searchQuery: options.searchQuery, attachment: options.attachment, memory: options.memory }), signal,
   });
   if (!response.ok || !response.body || !response.headers.get('content-type')?.includes('text/event-stream')) {

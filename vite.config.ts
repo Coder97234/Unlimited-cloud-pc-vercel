@@ -1,4 +1,6 @@
+import { randomBytes, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -14,6 +16,8 @@ import { handleAnalytics } from './server/analytics.ts';
 import { productionDb } from './server/database.ts';
 import { localPlatformDb } from './server/local-database.ts';
 import { handleJobs } from './server/jobs.ts';
+import { workTextQueue } from './server/job-worker.ts';
+import type { SendAccountMail } from './server/account-email.ts';
 import { accountConfig, handleAccount } from './server/account.ts';
 import { workspaceConfig } from './server/workspace-connections.ts';
 import { XYVORA_URL } from './shared/site.ts';
@@ -22,9 +26,14 @@ import { PUBLIC_PAGES, publicPages } from './server/public-pages.ts';
 function apiInDevelopment(env: Record<string, string | undefined>): Plugin {
   const realServerModel = env.XYVORA_SERVER_MODELS === '1';
   const local = env.XYVORA_LOCAL_PLATFORM === '1';
-  const db = local ? localPlatformDb() : productionDb(env);
+  const db = local ? localPlatformDb(env.XYVORA_LOCAL_PLATFORM_DIR) : productionDb(env);
   // The embedded database is a separate, explicitly enabled test deployment.
-  const identityEnv = local ? { XYVORA_ENABLE_PASSWORDS: '1', XYVORA_ENABLE_BACKGROUND: '1' } : env;
+  const identityEnv = local ? { XYVORA_ENABLE_PASSWORDS: '1', XYVORA_ENABLE_BACKGROUND: '1', XYVORA_AUTH_SECRET: env.XYVORA_AUTH_SECRET || randomBytes(32).toString('hex') } : env;
+  const localMail: SendAccountMail | undefined = local ? async (message, signal) => {
+    const dir = env.XYVORA_LOCAL_MAIL_DIR || '.cache/xyvora-platform-mail';
+    await mkdir(dir, { recursive: true, mode: 0o700 });
+    await writeFile(`${dir}/${randomUUID()}.json`, JSON.stringify(message), { mode: 0o600, flag: 'wx', signal });
+  } : undefined;
   const chat = { generate: realServerModel ? generateOnServer : undefined, search: realServerModel ? searchWeb : undefined, preview: !realServerModel, limit: realServerModel };
   const settings = workspaceConfig(env);
   const middleware: Connect.NextHandleFunction = (incoming, outgoing, next) => {
@@ -48,11 +57,11 @@ function apiInDevelopment(env: Record<string, string | undefined>): Plugin {
       const request = new Request(`${tls ? 'https' : 'http'}://${host}${incoming.url}`, init);
       const url = new URL(request.url);
       const localOrigin = local && (url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname.endsWith('.e2b.app')) ? url.origin : undefined;
-      const accounts = local && !localOrigin ? undefined : accountConfig(identityEnv, db, localOrigin);
+      const accounts = local && !localOrigin ? undefined : accountConfig(identityEnv, db, localOrigin, localMail);
       const response = path === '/api/account' ? await handleAccount(request, accounts)
         : path === '/api/analytics' ? await handleAnalytics(request, accounts?.origin ?? env.XYVORA_ACCOUNT_ORIGIN ?? XYVORA_URL, accounts?.db)
         : path === '/api/workspace' ? await handleWorkspace(request, settings, { limit: false })
-        : url.searchParams.get('work') === 'jobs' ? await handleJobs(request, accounts, chat, (work) => { void work; })
+        : url.searchParams.get('work') === 'jobs' ? await handleJobs(request, accounts)
         : await handleChat(request, chat);
       outgoing.statusCode = response.status;
       response.headers.forEach((value, key) => { if (key !== 'set-cookie') outgoing.setHeader(key, value); });
@@ -68,10 +77,16 @@ function apiInDevelopment(env: Record<string, string | undefined>): Plugin {
       outgoing.end(JSON.stringify({ error: 'The development API could not respond.' }));
     });
   };
+  function startLocalWorker(httpServer: { once: (event: 'close', stop: () => void) => unknown } | null) {
+    if (!local || !db) return;
+    const controller = new AbortController();
+    httpServer?.once('close', () => controller.abort());
+    void workTextQueue(db, XYVORA_URL, chat, controller.signal);
+  }
   return {
     name: 'xyvora-workspace-development',
-    configureServer(server) { server.middlewares.use(middleware); },
-    configurePreviewServer(server) { server.middlewares.use(middleware); },
+    configureServer(server) { server.middlewares.use(middleware); startLocalWorker(server.httpServer); },
+    configurePreviewServer(server) { server.middlewares.use(middleware); startLocalWorker(server.httpServer); },
   };
 }
 

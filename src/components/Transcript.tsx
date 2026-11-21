@@ -1,24 +1,16 @@
 import { AlertCircle, ArrowUpRight, Check, Clipboard, Clock3, GitBranch, Globe, Image, Paperclip, Pencil, RotateCcw, ShieldCheck, Zap } from 'lucide-react';
-import { lazy, memo, Suspense, useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import { XYVORA_NAME } from '../../shared/models.ts';
 import { skillName } from '../../shared/skill-catalog.ts';
 import { DEFAULT_MODE, MODES } from '../../shared/modes.ts';
 import type { Answer, Thread, Turn } from '../lib/history.ts';
 import { hasCompletedWord, hopMascot } from '../lib/mascot-motion.ts';
 import { Mascot } from './Brand.tsx';
+import MarkdownAnswer from './MarkdownAnswer.tsx';
 
-function PlainAnswer({ content }: { content: string }) {
-  return <div className="markdown plain-answer">{content}</div>;
-}
-
-// Markdown parsing isn't needed to open the workspace or show the first text.
-// Plain text remains available if the chunk can't be loaded (e.g. offline).
-const MarkdownAnswer = lazy(() => import('./MarkdownAnswer.tsx').catch(() => ({ default: PlainAnswer })));
-const AnswerText = memo(function AnswerText({ content, trustedLinksOnly }: { content: string; trustedLinksOnly: boolean }) {
-  return <Suspense fallback={<PlainAnswer content={content} />}>
-    <MarkdownAnswer content={content} trustedLinksOnly={trustedLinksOnly} />
-  </Suspense>;
-});
+// Render completed replies directly, including instant tools whose whole
+// response arrives in one frame. Don’t fall back to raw Markdown syntax.
+const AnswerText = memo(MarkdownAnswer);
 
 function AnswerCard({ answer, archived, searching, onRetry, onBranch, onAlert }: {
   answer: Answer; archived: boolean; searching: boolean; onRetry?: () => void; onBranch?: () => void;

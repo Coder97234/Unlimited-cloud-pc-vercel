@@ -33,7 +33,7 @@ export function workspaceConfig(env: Env): WorkspaceConfig {
   for (const provider of ['gmail', 'vercel'] as const) {
     const prefix = `XYVORA_${provider.toUpperCase()}`;
     const id = env[`${prefix}_CLIENT_ID`], clientSecret = env[`${prefix}_CLIENT_SECRET`];
-    if (sessionKey && id && clientSecret) clients[provider] = { id, secret: clientSecret };
+    if (env[`${prefix}_PLUGIN_ENABLED`] === '1' && sessionKey && id && clientSecret) clients[provider] = { id, secret: clientSecret };
   }
   const accessCode = env.XYVORA_IMAGE_ACCESS_CODE?.trim(), key = env.XYVORA_IMAGE_API_KEY?.trim();
   const image = key && accessCode && accessCode.length >= 24 && accessCode.length <= 180 ? { key, accessCode, vision: env.XYVORA_ENABLE_VISION === '1' } : undefined;
@@ -89,7 +89,7 @@ export function connectionStatus(request: Request, config: WorkspaceConfig, prov
 
 export function startConnection(request: Request, config: WorkspaceConfig, provider: Provider, headers: Headers) {
   const client = config.clients[provider];
-  if (!onConfiguredOrigin(request, config) || !client) throw new ToolError('This account connection is not configured for this site.', 503);
+  if (!onConfiguredOrigin(request, config) || !client) throw new ToolError('This account connection is unavailable.', 503);
   const state = randomBytes(32).toString('base64url');
   const verifier = randomBytes(48).toString('base64url');
   const name = authCookie(provider);

@@ -1,14 +1,15 @@
-import { ArrowUpRight, Blocks, Download, GitBranch, ListTree, Moon, PanelLeftOpen, Shield, Sparkles, Sun, UserRound, X } from 'lucide-react';
+import { Blocks, Download, GitBranch, ListTree, Moon, PanelLeftOpen, Shield, Sparkles, Sun, UserRound, X } from 'lucide-react';
 import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { guestAccount } from '../shared/account.ts';
-import type { AccountStatus } from '../shared/account.ts';
+import { guestAccount, parseAccountLink } from '../shared/account.ts';
+import type { AccountLink, AccountStatus } from '../shared/account.ts';
 import { isVisionFile, MAX_VISION_QUESTION } from '../shared/media.ts';
 import { MAX_MEMORY_NOTE, memoryForSend } from '../shared/memory.ts';
 import type { MemoryProfile } from '../shared/memory.ts';
 import { readSkillCommand } from '../shared/skill-catalog.ts';
 import { DEFAULT_MODEL, MAX_ATTACHMENT, MAX_PROMPT, XYVORA_NAME, XYVORA_SITE } from '../shared/models.ts';
 import type { Availability, TextAttachment } from '../shared/models.ts';
-import { ABOUT_PATH, SCHOOLS_PATH, XYVORA_SLOGAN } from '../shared/site.ts';
+import { XYVORA_SLOGAN } from '../shared/site.ts';
+import type { Theme, WorkspacePreferences } from '../shared/preferences.ts';
 import { allowsSearchToggle, chatSearchQuery, MAX_SEARCH_QUERY } from '../shared/search.ts';
 import { DEFAULT_MODE } from '../shared/modes.ts';
 import type { ReplyMode } from '../shared/modes.ts';
@@ -18,7 +19,7 @@ import type { PluginIntent } from '../shared/workspace-tools.ts';
 import { brandAnswer } from '../shared/branding.ts';
 import { fencedText } from '../shared/text-tools.ts';
 import { runInstantSkill } from '../shared/skills.ts';
-import { AccountDialog, MemoryDialog } from './components/AccountDialogs.tsx';
+import { AccountDialog, MemoryDialog, PasswordLinkDialog } from './components/AccountDialogs.tsx';
 import { TasksDialog } from './components/TasksDialog.tsx';
 import { VisionDialog } from './components/VisionDialog.tsx';
 import { BrandLockup } from './components/Brand.tsx';
@@ -26,14 +27,14 @@ import { BranchDialog, ContextDialog } from './components/ChatControls.tsx';
 import { Composer } from './components/Composer.tsx';
 import { Dialog } from './components/Dialog.tsx';
 import { Sidebar } from './components/Sidebar.tsx';
+import { SiteFooter } from './components/SiteFooter.ts';
 import { ModeDialog } from './components/ModeDialog.tsx';
 import { Suggestions } from './components/Suggestions.tsx';
 import { Transcript } from './components/Transcript.tsx';
-import { AboutDialog, SearchDialog, SettingsDialog } from './components/WorkspaceDialogs.tsx';
-import type { Theme } from './components/WorkspaceDialogs.tsx';
-import { accountChangeKey, accountMemoryChangeKey, guestMemoryKey, loadAccount, loadAccountMemory, loadGuestMemory, notifyAccountChange } from './lib/account.ts';
+import { AboutDialog, SearchDialog, SettingsDialog, ShortcutsDialog } from './components/WorkspaceDialogs.tsx';
+import { accountChangeKey, accountMemoryChangeKey, guestMemoryKey, loadAccount, loadAccountMemory, loadGuestMemory, notifyAccountChange, saveAccountSettings } from './lib/account.ts';
 import { downloadConversation } from './lib/export-chat.ts';
-import { buildMessages, forkThread, loadThreads, MAX_THREADS, MAX_TURNS, storeThreads, titleForPrompt } from './lib/history.ts';
+import { buildMessages, forkThread, loadThreads, MAX_THREADS, MAX_TURNS, titleForPrompt } from './lib/history.ts';
 import type { Answer, Thread, Turn } from './lib/history.ts';
 import { combineFiles, MAX_FILES, readLocalFile } from './lib/files.ts';
 import type { LocalFile } from './lib/files.ts';
@@ -41,19 +42,17 @@ import { ChatError, streamChat } from './lib/stream.ts';
 import { photoBase64, prepareVisionPhoto } from './lib/vision-file.ts';
 import type { VisionPhoto } from './lib/vision-file.ts';
 import { approveTool, getWorkspace } from './lib/workspace-api.ts';
+import { currentTheme, setBrowserTheme } from './lib/theme.ts';
+import { useChatHistory } from './lib/use-history.ts';
 
 type ForkKind = 'edit' | 'reply';
 type Modal = { kind: 'delete'; thread: Thread } | { kind: 'plugins'; intent?: PluginIntent }
   | { kind: 'fork'; turnId: string; fork: ForkKind } | { kind: 'memory'; initial?: string }
-  | { kind: 'search' | 'settings' | 'about' | 'mode' | 'context' | 'account' | 'vision' | 'tasks' };
+  | { kind: 'search' | 'shortcuts' | 'settings' | 'about' | 'mode' | 'context' | 'account' | 'vision' | 'tasks' | 'sync-conflict' };
 const PluginsDialog = lazy(() => import('./components/PluginsDialog.tsx').then(({ PluginsDialog }) => ({ default: PluginsDialog })).catch(() => ({
   default: ({ onClose }: { onClose: () => void }) => <Dialog title="Plugins unavailable" onClose={onClose}><p>Couldn’t load the workspace. Check your connection and refresh to try again.</p></Dialog>,
 })));
 
-function readTheme(): Theme {
-  try { return localStorage.getItem('xyvora.theme') === 'dark' ? 'dark' : 'light'; }
-  catch { return 'light'; }
-}
 const emptyTurns: Turn[] = [];
 
 const guest = guestAccount();
@@ -73,6 +72,18 @@ export default function App() {
         setChatStatus({ availability: available ? data.availability : 'unavailable', canSearch: available && data.webSearch === true });
       }).catch(() => { if (!controller.signal.aborted) setChatStatus({ availability: 'unavailable', canSearch: false }); });
     return () => controller.abort();
+  }, []);
+  const [accountLink, setAccountLink] = useState(() => parseAccountLink(window.location.hash));
+  useEffect(() => {
+    function takeLink() {
+      const link = parseAccountLink(window.location.hash);
+      if (!link) return;
+      setAccountLink(link);
+      history.replaceState(null, '', location.pathname + location.search);
+    }
+    takeLink();
+    window.addEventListener('hashchange', takeLink);
+    return () => window.removeEventListener('hashchange', takeLink);
   }, []);
   const [session, setSession] = useState<{ account: AccountStatus; error?: string }>();
   const [check, setCheck] = useState(0);
@@ -98,13 +109,21 @@ export default function App() {
   // Keep chat, drafts, and memory in a fresh component when the identity changes.
   // No guest history is loaded before the server checks a possible session.
   return <Workspace key={session ? session.account.user?.id ?? 'guest' : 'checking'} account={session?.account ?? guest}
-    checking={!session} chatStatus={chatStatus} accountError={session?.error} onCheckAccount={refresh} />;
+    checking={!session} chatStatus={chatStatus} accountError={session?.error} onCheckAccount={refresh}
+    accountLink={accountLink} dismissLink={() => setAccountLink(undefined)} />;
 }
 
-function Workspace({ account, checking, chatStatus: { availability, canSearch }, accountError, onCheckAccount }: { account: AccountStatus; checking: boolean; chatStatus: { availability: Availability | 'loading'; canSearch: boolean }; accountError?: string; onCheckAccount: () => void }) {
+function Workspace({ account, checking, chatStatus: { availability, canSearch }, accountError, onCheckAccount, accountLink, dismissLink }: { account: AccountStatus; checking: boolean; chatStatus: { availability: Availability | 'loading'; canSearch: boolean }; accountError?: string; onCheckAccount: () => void; accountLink?: AccountLink; dismissLink: () => void }) {
   const accountId = account.user?.id;
-  const [threads, setThreads] = useState(() => checking ? [] : loadThreads(accountId));
-  const savedThreads = useRef(threads);
+  const [busy, setBusy] = useState(false);
+  const history = useChatHistory(accountId, checking, busy);
+  const { chats: threads, setChats: setThreads } = history;
+  const canSignIn = !!(account.passwords || account.providers.length);
+  const blocked = checking || !history.ready;
+  const [hasLegacy, setHasLegacy] = useState(() => !!accountId && loadThreads(accountId).length > 0);
+  const [defaultMode, setDefaultMode] = useState(account.settings?.mode ?? DEFAULT_MODE);
+  const settingsUpdates = useRef<Promise<void>>(Promise.resolve());
+  const settingsLife = useRef<AbortController | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
   // Temporary conversations and unsent branches never enter the saved list.
   const [scratch, setScratch] = useState<{ thread: Thread | null } | null>(null);
@@ -113,19 +132,19 @@ function Workspace({ account, checking, chatStatus: { availability, canSearch },
   const [draft, setDraft] = useState('');
   const [files, setFiles] = useState<LocalFile[]>([]);
   const [photo, setPhoto] = useState<VisionPhoto>();
+  const [canAnalyze, setCanAnalyze] = useState(false);
   const filePicker = useRef<HTMLInputElement>(null);
   const repositoryDraft = useRef<RepoWorkbenchDraft | undefined>(undefined);
   const [memory, setMemory] = useState<MemoryProfile | undefined>(() => accountId || checking ? undefined : loadGuestMemory());
   const [memoryError, setMemoryError] = useState('');
   const [memoryRequest, setMemoryRequest] = useState(0);
   const [readingFiles, setReadingFiles] = useState(false);
-  const [mode, setMode] = useState<ReplyMode>(DEFAULT_MODE);
+  const [mode, setMode] = useState<ReplyMode>(defaultMode);
   const fileJob = useRef<AbortController | null>(null);
   const [webSearch, setWebSearch] = useState(false);
-  const [theme, setTheme] = useState<Theme>(readTheme);
+  const [theme, setTheme] = useState<Theme>(currentTheme);
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState('');
   const [modal, setModal] = useState<Modal | null>(null);
   const textarea = useRef<HTMLTextAreaElement>(null);
@@ -149,7 +168,10 @@ function Workspace({ account, checking, chatStatus: { availability, canSearch },
       window.history.replaceState(null, '', url);
     }
     if (outcome === 'signed-in' && account.user) setToast('You’re signed in to Xyvora.');
-    else if (outcome === 'signed-in' || outcome === 'failed') {
+    else if (outcome === 'password-reset') {
+      if (!account.user && canSignIn) setModal({ kind: 'account' });
+      setToast('Password changed. Use your new password to sign in.');
+    } else if (outcome === 'signed-in' || outcome === 'failed') {
       setModal({ kind: 'account' });
       setToast('Couldn’t finish sign-in. Try the provider again.');
     }
@@ -158,7 +180,7 @@ function Workspace({ account, checking, chatStatus: { availability, canSearch },
     if (!isProvider(provider) || (result !== 'connected' && result !== 'failed')) return;
     setModal({ kind: 'plugins', intent: { id: provider } });
     if (result === 'failed') setToast(`Couldn’t connect ${PLUGINS[provider].name}. Review consent and try again.`);
-  }, [account, checking]);
+  }, [account, checking, canSignIn]);
 
   useEffect(() => {
     if (!accountId) return;
@@ -183,16 +205,36 @@ function Workspace({ account, checking, chatStatus: { availability, canSearch },
   }, [accountId, checking]);
   useEffect(() => () => { controllerRef.current?.abort(); fileJob.current?.abort(); }, []);
 
+  useLayoutEffect(() => {
+    const update = () => setTheme(currentTheme());
+    window.addEventListener('xyvora:theme', update);
+    if (account.settings?.theme) setBrowserTheme(account.settings.theme);
+    update();
+    return () => window.removeEventListener('xyvora:theme', update);
+  }, [account.settings?.theme]);
   useEffect(() => {
-    document.documentElement.dataset.theme = theme;
-    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'dark' ? '#181621' : '#f8f7fb');
-    try { localStorage.setItem('xyvora.theme', theme); } catch { /* Browser storage may be unavailable. */ }
-  }, [theme]);
-  useEffect(() => {
-    if (checking || busy || savedThreads.current === threads) return;
-    if (storeThreads(threads, accountId)) savedThreads.current = threads;
-    else setToast('This browser could not save chat history.');
-  }, [threads, busy, accountId, checking]);
+    const life = new AbortController();
+    settingsLife.current = life;
+    return () => { life.abort(); settingsLife.current = null; };
+  }, []);
+  function syncSettings(patch: WorkspacePreferences) {
+    const signal = settingsLife.current?.signal;
+    if (!accountId || !signal) return;
+    settingsUpdates.current = settingsUpdates.current.then(async () => {
+      signal.throwIfAborted();
+      await saveAccountSettings(accountId, patch, signal);
+    }).catch(() => { if (!signal.aborted) setToast('Could not sync workspace settings. Try that change again.'); });
+  }
+  function chooseTheme(value: Theme) { setBrowserTheme(value); syncSettings({ theme: value }); }
+  function chooseDefaultMode(value: ReplyMode) { setDefaultMode(value); setMode(value); syncSettings({ mode: value }); }
+  function importBrowserChats() {
+    if (!history.ready || !accountId) return;
+    const known = new Set(threads.map(({ id }) => id));
+    const drafts = loadThreads(accountId).filter((thread) => !known.has(thread.id) && thread.turns.length && thread.turns.every((turn) => turn.answers.length));
+    if (drafts.length + threads.length > MAX_THREADS) { setToast('Remove some saved chats before importing older conversations.'); return; }
+    if (drafts.length) setThreads((current) => [...current, ...drafts].sort((a, b) => b.updatedAt - a.updatedAt));
+    setHasLegacy(false);
+  }
   useEffect(() => {
     if (!toast) return;
     const timer = setTimeout(() => setToast(''), 5_000);
@@ -211,9 +253,10 @@ function Workspace({ account, checking, chatStatus: { availability, canSearch },
     setReadingFiles(false);
     setFiles([]);
     setPhoto(undefined);
+    setCanAnalyze(false);
   }
   async function attachFiles(items: File[]) {
-    if (checking || fileJob.current || controllerRef.current || !items.length || photo) return;
+    if (checking || (!history.ready && !temporary) || fileJob.current || controllerRef.current || !items.length || photo) return;
     const images = items.filter(isVisionFile);
     if (images.length) {
       if (images.length !== 1 || items.length !== 1 || files.length) {
@@ -223,11 +266,14 @@ function Workspace({ account, checking, chatStatus: { availability, canSearch },
       fileJob.current = controller;
       setReadingFiles(true);
       try {
-        // A capability check is a GET, not a file upload.
-        const status = await getWorkspace(controller.signal);
-        if (!status.hostedVision) throw new Error('Image analysis needs a provider configured by the site owner.');
-        const prepared = await prepareVisionPhoto(images[0], controller.signal);
+        // Preview stays local even if hosted analysis is turned off. No
+        // provider sees the image before explicit review and approval.
+        const [prepared, status] = await Promise.all([
+          prepareVisionPhoto(images[0], controller.signal),
+          getWorkspace(AbortSignal.any([controller.signal, AbortSignal.timeout(4_000)])).catch(() => undefined),
+        ]);
         controller.signal.throwIfAborted();
+        setCanAnalyze(status?.hostedVision === true);
         setPhoto(prepared);
         setWebSearch(false);
         focusPrompt();
@@ -266,7 +312,7 @@ function Workspace({ account, checking, chatStatus: { availability, canSearch },
     setScratch(temporary ? { thread: null } : null);
     setBranchDraft(null);
     setIsolated(false);
-    setMode(DEFAULT_MODE);
+    setMode(defaultMode);
     setDraft('');
     clearFiles();
     setWebSearch(false);
@@ -282,7 +328,7 @@ function Workspace({ account, checking, chatStatus: { availability, canSearch },
     setBranchDraft(null);
     setActiveId(thread.id);
     const latest = thread.turns.at(-1);
-    setMode(latest?.answers[0]?.replyMode ?? DEFAULT_MODE);
+    setMode(latest?.answers[0]?.replyMode ?? defaultMode);
     setIsolated(latest?.contextOnly === true);
     setDraft('');
     clearFiles();
@@ -304,7 +350,7 @@ function Workspace({ account, checking, chatStatus: { availability, canSearch },
     setBranchDraft({ thread: branch, originalId: active.id });
     if (fork === 'edit') {
       setDraft(turn.prompt.slice(0, MAX_PROMPT));
-      setMode(turn.answers[0]?.replyMode ?? DEFAULT_MODE);
+      setMode(turn.answers[0]?.replyMode ?? defaultMode);
       setIsolated(turn.contextOnly === true);
       if (carryAttachment && turn.attachment) setFiles([{ ...turn.attachment, id: crypto.randomUUID(), truncated: false }]);
     }
@@ -337,29 +383,36 @@ function Workspace({ account, checking, chatStatus: { availability, canSearch },
     if (files.length) { setToast('Remove text attachments before adding an image.'); focusPrompt(); return; }
     requestAnimationFrame(() => filePicker.current?.click());
   }
-  function toggleTheme() { setTheme((current) => current === 'dark' ? 'light' : 'dark'); }
+  function toggleTheme() { chooseTheme(currentTheme() === 'dark' ? 'light' : 'dark'); }
 
   useEffect(() => {
     function keyboard(event: KeyboardEvent) {
+      if (event.defaultPrevented || event.isComposing || event.repeat) return;
       const key = event.key.toLowerCase();
-      if ((event.metaKey || event.ctrlKey) && key === 'k') {
-        event.preventDefault();
-        setModal({ kind: 'search' });
-      } else if ((event.metaKey || event.ctrlKey) && key === '/') {
+      const command = (event.metaKey || event.ctrlKey) && !event.altKey;
+      if (key === 'escape') { setMobileOpen(false); return; }
+      if (modal || (accountLink && !checking)) return;
+      if (command && key === 'k' && !event.shiftKey) {
+        event.preventDefault(); setMobileOpen(false); setModal({ kind: 'search' });
+      } else if (command && key === '/' && !event.shiftKey) {
         event.preventDefault(); openPlugins();
-      } else if ((event.metaKey || event.ctrlKey) && event.shiftKey && key === 'o') {
-        event.preventDefault(); closeModal(); setNew();
-      } else if (key === 'escape') setMobileOpen(false);
+      } else if (command && event.shiftKey && (key === 'n' || key === 'o')) {
+        event.preventDefault(); setNew();
+      } else if (key === '?' && !command && !event.altKey && !event.ctrlKey && !event.metaKey) {
+        const target = event.target;
+        if (target instanceof HTMLElement && (target.isContentEditable || target.closest('input, textarea, select, [role="textbox"]'))) return;
+        event.preventDefault(); setMobileOpen(false); setModal({ kind: 'shortcuts' });
+      }
     }
     window.addEventListener('keydown', keyboard);
     return () => window.removeEventListener('keydown', keyboard);
-  }, []);
+  }, [modal, accountLink, checking, defaultMode]);
 
   async function run(retry?: Turn, accessCode?: string) {
     const prompt = retry?.prompt ?? draft.trim();
-    if (checking || controllerRef.current || fileJob.current || archived || !prompt || retry?.imageName) return;
+    if (checking || (!history.ready && !temporary) || controllerRef.current || fileJob.current || archived || !prompt || retry?.imageName) return;
     const picture = retry ? undefined : photo;
-    if (picture && prompt.length > MAX_VISION_QUESTION) return;
+    if (picture && (!canAnalyze || prompt.length > MAX_VISION_QUESTION)) return;
     if (picture && !accessCode) { setModal({ kind: 'vision' }); return; }
     const remember = !picture && !retry ? /^\/remember(?:\s+([\s\S]*))?$/i.exec(prompt) : null;
     if (remember) {
@@ -367,7 +420,9 @@ function Workspace({ account, checking, chatStatus: { availability, canSearch },
       if (note && (note.length > MAX_MEMORY_NOTE || /[\x00-\x1f\x7f]/.test(note))) { setToast(`Write one memory note, up to ${MAX_MEMORY_NOTE} characters.`); return; }
       openMemory(note); return;
     }
-    if (branchDraft && threads.length >= MAX_THREADS) { setToast('Delete a saved chat before saving this branch.'); return; }
+    if (!temporary && (branchDraft || !active) && threads.length >= MAX_THREADS) {
+      setToast('Export or delete a saved chat before starting another, or use Temporary chat.'); return;
+    }
     const external = picture ? undefined : workspaceIntent(prompt);
     if (external) {
       // This is a proposal, not a call. The draft and files stay in the composer.
@@ -459,7 +514,7 @@ function Workspace({ account, checking, chatStatus: { availability, canSearch },
     }
   }
 
-  const composer = <Composer draft={draft} onDraft={setDraft} textarea={textarea} files={files} photo={photo} filePicker={filePicker} checking={checking}
+  const composer = <Composer draft={draft} onDraft={setDraft} textarea={textarea} files={files} photo={photo} filePicker={filePicker} checking={checking || (!history.ready && !temporary)} canAnalyze={canAnalyze}
     usesMemory={readSkillCommand(draft)?.id !== 'translate' && !!memoryForSend(memory, temporary, isolated)} onRemovePhoto={() => setPhoto(undefined)} onAttach={(items) => void attachFiles(items)}
     onRemoveFile={(id) => setFiles((current) => current.filter((file) => file.id !== id))} readingFiles={readingFiles}
     mode={mode} onMode={() => setModal({ kind: 'mode' })} onSend={() => void run()} onStop={stop} busy={busy} isolated={isolated} webSearch={webSearch} canSearch={canSearch}
@@ -484,7 +539,7 @@ function Workspace({ account, checking, chatStatus: { availability, canSearch },
   }
 
   function attachRepoFile(attachment: TextAttachment, copy: RepoWorkbenchDraft) {
-    if (checking || fileJob.current || controllerRef.current) { setToast('Finish the current response or file read first.'); return; }
+    if (blocked || fileJob.current || controllerRef.current) { setToast('Finish the current response or file read first.'); return; }
     if (!archived && (photo || files.length >= MAX_FILES)) { setToast('Remove an attachment before adding a repository file.'); return; }
     const file = { ...attachment, text: attachment.text.slice(0, MAX_ATTACHMENT), id: crypto.randomUUID(), truncated: attachment.text.length > MAX_ATTACHMENT };
     if (archived) { setNew(); setFiles([file]); }
@@ -502,9 +557,9 @@ function Workspace({ account, checking, chatStatus: { availability, canSearch },
     <Sidebar threads={threads} activeId={activeId} availability={availability} temporary={temporary} memoryOn={memory?.enabled === true} signedIn={!!accountId} onMemory={() => openMemory()} onNew={setNew}
       onTemporary={() => { if (temporary) { setMobileOpen(false); focusPrompt(); } else startChat(true); }}
       onSearch={() => { setMobileOpen(false); setModal({ kind: 'search' }); }} onPlugins={() => openPlugins()} onWebSearch={() => pickPrompt('/search ', true)}
-      onRepo={() => openPlugins({ id: 'repo' })} onTasks={() => { setMobileOpen(false); setModal({ kind: 'tasks' }); }}
+      onRepo={() => openPlugins({ id: 'repo' })} onTasks={account.background ? () => { setMobileOpen(false); setModal({ kind: 'tasks' }); } : undefined}
       onImage={() => openPlugins({ id: 'image' })} onSettings={() => { setMobileOpen(false); setModal({ kind: 'settings' }); }}
-      onCollapse={toggleSidebar} onThread={showThread} onDelete={(thread) => setModal({ kind: 'delete', thread })}
+      syncLabel={history.loading ? 'Loading saved chats…' : history.unsynced ? 'Sync pending' : history.ready ? 'Cloud history' : 'History unavailable'} onCollapse={toggleSidebar} onThread={showThread} onDelete={(thread) => setModal({ kind: 'delete', thread })}
       onAbout={() => { setMobileOpen(false); setModal({ kind: 'about' }); }} />
     <main className={`workspace${turns.length ? ' has-chat' : ''}`} id="main-workspace">
       <header className="topbar">
@@ -517,12 +572,18 @@ function Workspace({ account, checking, chatStatus: { availability, canSearch },
           <button type="button" className="plugins-button" aria-label="Plugins" aria-haspopup="dialog" aria-keyshortcuts="Control+/ Meta+/" onClick={() => openPlugins()}><Blocks size={16} /><span>Plugins</span></button>
           {!archived && <button type="button" className={`context-button${isolated ? ' context-isolated' : ''}`} aria-label="Message context" title={isolated ? 'Message context: This message only' : 'Message context: Recent chat'} aria-haspopup="dialog" disabled={busy} onClick={() => setModal({ kind: 'context' })}><ListTree size={16} /><span>Context</span></button>}
           {active && !temporary && !branchDraft && turns.length > 0 && <button type="button" className="icon-button export-button" aria-label="Download conversation as Markdown" title="Download conversation as Markdown" onClick={() => downloadConversation(active)}><Download size={17} /></button>}
-          <button type="button" className="identity-button" aria-label={accountId ? 'Your account' : 'Sign in'} aria-haspopup="dialog" title={accountId ? 'Your account' : 'Sign in or create an account'}
-            disabled={checking} onClick={openAccount}><UserRound size={16} /><span>{accountId ? 'Account' : 'Sign in'}</span></button>
+          <button type="button" className="identity-button" aria-label={accountId ? 'Your account' : canSignIn || checking ? 'Sign in' : 'Guest workspace'} aria-haspopup="dialog" title={accountId ? 'Your account' : canSignIn ? 'Sign in or create an account' : 'Guest workspace'}
+            disabled={checking} onClick={openAccount}><UserRound size={16} /><span>{accountId ? 'Account' : canSignIn || checking ? 'Sign in' : 'Guest'}</span></button>
           <span className="topbar-divider" aria-hidden="true" />
           <button type="button" className="icon-button theme-toggle" aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`} title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`} onClick={toggleTheme}>{theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}</button>
         </div>
       </header>
+      {history.problem && <aside className="chat-notice sync-notice" aria-label="Saved history">
+        <div><strong>{accountId ? 'Chat sync needs attention' : 'Chat history'}</strong><p role="status">{history.problem}</p></div>
+        {history.conflict ? <button type="button" className="secondary-button" onClick={() => setModal({ kind: 'sync-conflict' })}>Review</button>
+          : accountId && <button type="button" className="secondary-button" onClick={history.retry}>Retry</button>}
+      </aside>}
+      {history.loading && <p className="cloud-loading" role="status">Loading saved chats…</p>}
       {temporary && <aside className="chat-notice" aria-label="Temporary chat privacy"><Shield size={17} /><div><strong>Temporary chat</strong><p>Not saved in history and never uses memory. Messages and attachments can still be sent for replies.</p></div><button type="button" className="secondary-button" aria-label="End temporary chat" onClick={setNew}>End chat</button></aside>}
       {branchDraft && <aside className="chat-notice" aria-label="Branch draft"><GitBranch size={17} /><div><strong>New branch</strong><p>Your original stays intact. This branch is saved separately when you send.</p></div><button type="button" className="secondary-button" aria-label="Cancel branch" onClick={cancelFork}>Cancel</button></aside>}
       {turns.length > 0 && active ? <>
@@ -544,24 +605,16 @@ function Workspace({ account, checking, chatStatus: { availability, canSearch },
           <p className="workspace-tip">Try <code>/tools</code> for built-in tools, or ask “What time is it in Tokyo?”</p>
         </div>
       </div>}
-      <footer className="main-footer">
-        <span>{XYVORA_NAME} can make mistakes. Check important information.</span>
-        <nav className="footer-nav" aria-label="Xyvora resources">
-          <a className="footer-link" href={ABOUT_PATH}>About <ArrowUpRight size={12} /></a>
-          <a className="footer-link" href={SCHOOLS_PATH}>For schools</a>
-          <a className="footer-link" href="/developers">API</a>
-          <a className="footer-link" href="/analytics">Analytics</a>
-          <a className="footer-link" href="/terms">Terms</a>
-          <a className="footer-link" href="/privacy">Privacy</a>
-          <a className="footer-link" href="/cookies">Cookies</a>
-        </nav>
-      </footer>
+      <SiteFooter />
     </main>
-    {modal?.kind === 'search' && <SearchDialog threads={threads} onClose={closeModal} onPick={showThread} />}
-    {modal?.kind === 'settings' && <SettingsDialog theme={theme} count={threads.length} signedIn={!!accountId} onAccount={openAccount} onMemory={() => openMemory()} onTheme={setTheme} onClose={closeModal}
+    {modal?.kind === 'search' && <SearchDialog threads={threads} signedIn={!!accountId} onClose={closeModal} onPick={showThread} />}
+    {modal?.kind === 'settings' && <SettingsDialog theme={theme} count={threads.length} signedIn={!!accountId} canSignIn={canSignIn} defaultMode={defaultMode} onDefaultMode={chooseDefaultMode}
+      onAccount={openAccount} onMemory={() => openMemory()} onTheme={chooseTheme} onShortcuts={() => setModal({ kind: 'shortcuts' })} onImport={hasLegacy ? importBrowserChats : undefined} onClose={closeModal}
       onClear={() => { setNew(); setThreads([]); setToast('Chat history cleared.'); }} />}
+    {modal?.kind === 'shortcuts' && <ShortcutsDialog onClose={closeModal} />}
     {modal?.kind === 'tasks' && <TasksDialog accountId={accountId} available={account.background} onSignIn={openAccount} onClose={closeModal} />}
-    {modal?.kind === 'account' && <AccountDialog account={account} error={accountError} onRetry={onCheckAccount} onClose={closeModal} onMemory={() => openMemory()} />}
+    {modal?.kind === 'account' && <AccountDialog account={account} error={accountError} unsynced={history.unsynced} openSignIn={canSignIn} onRetry={onCheckAccount} onClose={closeModal} onMemory={() => openMemory()} />}
+    {accountLink && !checking && <PasswordLinkDialog key={accountLink.token} link={accountLink} onClose={dismissLink} />}
     {modal?.kind === 'memory' && <MemoryDialog key={memory ? 'ready' : 'loading'} profile={memory} accountId={accountId}
       initial={modal.initial} error={memoryError} onReload={() => { setMemoryError(''); setMemoryRequest((value) => value + 1); }}
       onSave={(saved) => { setMemory(saved); if (/^\/remember(?:\s|$)/i.test(draft.trim())) setDraft(''); closeModal(); setToast('Memory saved.'); }} onClose={closeModal} />}
@@ -575,9 +628,13 @@ function Workspace({ account, checking, chatStatus: { availability, canSearch },
       <PluginsDialog key={modal.intent?.id ?? 'list'} intent={modal.intent} textInput={combineFiles(files)?.text} onInsert={insertToolOutput} onChoosePhoto={pickPhoto} repoDraft={repositoryDraft.current} onRepoFile={attachRepoFile} onClose={closeModal} />
     </Suspense>}
     {modal?.kind === 'about' && <AboutDialog onClose={closeModal} />}
-    {modal?.kind === 'delete' && <Dialog title="Delete conversation?" subtitle="This only deletes the copy saved in this browser." onClose={closeModal}>
+    {modal?.kind === 'delete' && <Dialog title="Delete conversation?" subtitle={accountId ? 'This removes the conversation from your synced history.' : 'This only deletes the copy saved in this browser.'} onClose={closeModal}>
       <p className="delete-title">{modal.thread.title}</p>
       <div className="dialog-actions"><button className="secondary-button" type="button" onClick={closeModal}>Cancel</button><button className="danger-button" type="button" onClick={() => deleteThread(modal.thread)}>Delete chat</button></div>
+    </Dialog>}
+    {modal?.kind === 'sync-conflict' && <Dialog title="Use cloud history?" subtitle="Another device made changes. Replacing this copy discards unsynced edits here." onClose={closeModal}>
+      {active && !temporary && !branchDraft && <button type="button" className="secondary-button" onClick={() => downloadConversation(active)}><Download size={15} /> Export open conversation</button>}
+      <div className="dialog-actions"><button type="button" className="secondary-button" onClick={closeModal}>Cancel</button><button type="button" className="danger-button" onClick={() => { history.useCloudCopy(); setNew(); }}>Use cloud copies</button></div>
     </Dialog>}
     {toast && <div className="toast" role="status">{toast}<button type="button" className="bare-icon" aria-label="Dismiss notice" onClick={() => setToast('')}><X size={16} /></button></div>}
   </div>;

@@ -8,13 +8,13 @@
 - Text, code, CSV/JSON, and text-based PDF attachments. Scanned-PDF OCR is still separate.
 - Markdown chat download, local 4K artwork presets, and sandboxed JavaScript.
 - **Chat controls:** Temporary chat in the sidebar, edit or branch without changing an original chat, and **Context → This message only** for exchanges that should neither receive nor supply earlier context. These controls require no new server services.
-- **Personalization:** opt-in saved notes, with editing, deletion, and separate guest/account memory. Xyvora owns account identity, sessions, and note storage in PostgreSQL. Google, GitHub, Discord, or an optional password sign-in require server setup.
+- **Personalization:** opt-in saved notes, with editing, deletion, and separate guest/account memory. Xyvora owns account identity, sessions, synced history, settings and memory in PostgreSQL. Social sign-in and verified email/password with reset require server setup.
 - **Hosted image tools:** prompt-to-image with three aspect ratios, and questions about a chat attachment with explicit upload approval. These actions require a configured OpenAI project and studio access code. Fixtures cover the flows, not live provider availability.
 
 - **Projects and connections:** GitHub public repo browsing, issues, file excerpts and reviewed patch downloads; an approved GET registry for GitHub and npm; scoped Gmail/Vercel reads when configured. Private repository access, writes, and broad connector protocols are not included.
 - **Developer API:** Free keyless streaming text with documented limits, sample commands and an OpenAPI spec. Apps call from their server. No unlimited compute commitment.
 - **Transparency:** Public analytics counts actual opted-in browser activity with a separate registered account total. No active database yields an unavailable state. Terms, Privacy and Cookie choices describe controls; the owner still needs to confirm legal and operational requirements.
-- **Background tasks:** Optional account-scoped text replies within a short function lifetime. No external action, scheduling, or durable retry service.
+- **Background tasks:** Optional account-scoped text replies through a durable PostgreSQL queue and leased worker. No external action or scheduled workflows.
 
 ## Candidate release tracks
 

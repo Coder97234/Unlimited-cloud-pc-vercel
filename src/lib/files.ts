@@ -2,14 +2,14 @@ import { MAX_ATTACHMENT } from '../../shared/models.ts';
 import type { TextAttachment } from '../../shared/models.ts';
 
 export const MAX_FILES = 3;
-export const ACCEPTED_FILES = '.pdf,.txt,.md,.csv,.tsv,.json,.jsonl,.js,.mjs,.ts,.py,.log,.yaml,.yml,.xml,.html,.css,.sql';
+export const ACCEPTED_FILES = '.pdf,.txt,.md,.csv,.tsv,.json,.jsonl,.js,.mjs,.ts,.tsx,.jsx,.py,.rb,.rs,.java,.go,.sh,.log,.yaml,.yml,.xml,.html,.css,.sql';
 const extensions = ACCEPTED_FILES.split(',');
 const maxBytes = 4_000_000;
 export type LocalFile = TextAttachment & { id: string; truncated: boolean };
 
 export async function readLocalFile(file: File, signal: AbortSignal): Promise<LocalFile> {
   const name = file.name.replace(/[\x00-\x1f\x7f]/g, '').slice(0, 100).trim() || 'attachment.txt';
-  const extension = name.slice(name.lastIndexOf('.')).toLowerCase();
+  const extension = /\.[^.]+$/.exec(file.name)?.[0].toLowerCase() ?? (file.type === 'text/plain' ? '.txt' : '');
   if (!extensions.includes(extension)) throw new Error(`${name}: choose a text, code, CSV, JSON, or PDF file.`);
   if (file.size > maxBytes) throw new Error(`${name}: files can be at most 4 MB.`);
   let text: string, truncated: boolean;

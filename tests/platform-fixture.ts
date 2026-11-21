@@ -7,9 +7,8 @@ export const platformOrigin = 'https://test.xyvora.invalid';
 export async function platformFixture(t: TestContext): Promise<PlatformDb> {
   const db = new PGlite();
   t.after(() => db.close());
-  const migration = await readFile(new URL('../database/001_platform.sql', import.meta.url), 'utf8');
-  await db.exec(migration);
-  await db.exec(migration);
+  const migrations = await Promise.all(['001_platform.sql', '002_launch.sql'].map((file) => readFile(new URL(`../database/${file}`, import.meta.url), 'utf8')));
+  for (const migration of [...migrations, ...migrations]) await db.exec(migration);
   return { query: async (sql, params) => (await db.query(sql, params)).rows as never[] };
 }
 export function platformPost(path: string, body: object, headers: Record<string, string> = {}, signal?: AbortSignal) {

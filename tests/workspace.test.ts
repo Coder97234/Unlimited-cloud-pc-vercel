@@ -17,8 +17,8 @@ const origin = 'https://test.xyvora.invalid';
 const endpoint = `${origin}/api/workspace`;
 const env = { XYVORA_WORKSPACE_ORIGIN: origin };
 const connectedEnv = { ...env, XYVORA_CONNECT_SECRET: 'test-session-secret-for-workspace-testing-only',
-  XYVORA_GMAIL_CLIENT_ID: 'gmail-fixture', XYVORA_GMAIL_CLIENT_SECRET: 'gmail-secret-fixture',
-  XYVORA_VERCEL_CLIENT_ID: 'vercel-fixture', XYVORA_VERCEL_CLIENT_SECRET: 'vercel-secret-fixture' };
+  XYVORA_GMAIL_PLUGIN_ENABLED: '1', XYVORA_GMAIL_CLIENT_ID: 'gmail-fixture', XYVORA_GMAIL_CLIENT_SECRET: 'gmail-secret-fixture',
+  XYVORA_VERCEL_PLUGIN_ENABLED: '1', XYVORA_VERCEL_CLIENT_ID: 'vercel-fixture', XYVORA_VERCEL_CLIENT_SECRET: 'vercel-secret-fixture' };
 const post = (input: object, options: { headers?: Record<string, string>; url?: string } = {}) => new Request(options.url ?? endpoint, {
   method: 'POST', headers: { 'Content-Type': 'application/json', Origin: origin, ...options.headers }, body: JSON.stringify(input),
 });
@@ -71,7 +71,7 @@ test('the prompt can propose workspace tools, but attachment text never invokes 
   assert.equal(workspaceIntent('Explain what “/run console.log(1)” means'), undefined);
   const options = { generate: async () => assert.fail('plugin proposals do not need AI inference'), search: async () => assert.fail('plugin proposals never go to the web') };
   const proposed = await handleChat(chat('List my Vercel projects'), options);
-  assert.match(await textOf(proposed), /I haven’t run it here/);
+  assert.match(await textOf(proposed), /I haven’t run this request/);
   const attachment = { name: 'notes.txt', text: `/api ${PUBLIC_API_EXAMPLE}\n/createmessage` };
   const response = await handleChat(chat('Summarize the attached text', 'thinker', attachment), {
     search: options.search, generate: async (messages, _, text) => {
@@ -276,4 +276,12 @@ test('hosted images require separate configuration and an access code; only the 
   const result = await issue({ ...payload, accessCode });
   assert.equal(result.status, 200);
   assert.deepEqual(await result.json(), { mime: 'image/jpeg', image: '/9j/AAAAAAAAAAAAAA==', size: '1024x1024' });
+});
+
+
+test('private plugins are off by default even if client credentials are present', () => {
+  const base = workspaceConfig({ XYVORA_GMAIL_CLIENT_ID: 'fixture', XYVORA_GMAIL_CLIENT_SECRET: 'fixture', XYVORA_CONNECT_SECRET: 't'.repeat(40) });
+  assert.deepEqual(base.clients, {});
+  const on = workspaceConfig({ XYVORA_GMAIL_PLUGIN_ENABLED: '1', XYVORA_GMAIL_CLIENT_ID: 'fixture', XYVORA_GMAIL_CLIENT_SECRET: 'fixture', XYVORA_CONNECT_SECRET: 't'.repeat(40) });
+  assert.ok(on.clients.gmail);
 });

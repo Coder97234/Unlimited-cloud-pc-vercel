@@ -6,9 +6,9 @@ import type { Availability } from '../../shared/models.ts';
 import type { Thread } from '../lib/history.ts';
 import { Mascot } from './Brand.tsx';
 
-export function Sidebar({ threads, activeId, availability, temporary, memoryOn, signedIn, onMemory, onNew, onTemporary, onSearch, onPlugins, onRepo, onTasks, onWebSearch, onImage, onSettings, onCollapse, onThread, onDelete, onAbout }: {
+export function Sidebar({ threads, activeId, availability, temporary, memoryOn, signedIn, syncLabel, onMemory, onNew, onTemporary, onSearch, onPlugins, onRepo, onTasks, onWebSearch, onImage, onSettings, onCollapse, onThread, onDelete, onAbout }: {
   threads: Thread[]; activeId: string | null; availability: Availability | 'loading';
-  temporary: boolean; memoryOn: boolean; signedIn: boolean; onMemory: () => void; onNew: () => void; onTemporary: () => void; onSearch: () => void; onPlugins: () => void; onRepo: () => void; onTasks: () => void; onWebSearch: () => void; onImage: () => void;
+  temporary: boolean; memoryOn: boolean; signedIn: boolean; syncLabel: string; onMemory: () => void; onNew: () => void; onTemporary: () => void; onSearch: () => void; onPlugins: () => void; onRepo: () => void; onTasks?: () => void; onWebSearch: () => void; onImage: () => void;
   onSettings: () => void; onCollapse: () => void; onThread: (thread: Thread) => void;
   onDelete: (thread: Thread) => void; onAbout: () => void;
 }) {
@@ -21,15 +21,15 @@ export function Sidebar({ threads, activeId, availability, temporary, memoryOn, 
       <button type="button" className="icon-button sidebar-toggle" aria-label="Close sidebar" title="Close sidebar" onClick={onCollapse}><PanelLeftClose size={18} /></button>
     </div>
     <div className="sidebar-content">
-      <button className="new-chat" type="button" onClick={onNew}><Plus size={19} strokeWidth={2.2} /> <span>New chat</span><kbd>{mac ? '⌘⇧O' : 'Ctrl ⇧ O'}</kbd></button>
+      <button className="new-chat" type="button" onClick={onNew} aria-keyshortcuts="Control+Shift+N Meta+Shift+N"><Plus size={19} strokeWidth={2.2} /> <span>New chat</span><kbd>{mac ? '⌘⇧N' : 'Ctrl ⇧ N'}</kbd></button>
       <button className={`nav-button temporary-trigger${temporary ? ' active' : ''}`} type="button" aria-current={temporary ? 'true' : undefined} onClick={onTemporary}><Shield size={17} /><span>Temporary chat</span></button>
-      <button className="search-trigger nav-button" type="button" onClick={onSearch}><Search size={17} /><span>Search chats</span><kbd>{mac ? '⌘ K' : 'Ctrl K'}</kbd></button>
+      <button className="search-trigger nav-button" type="button" onClick={onSearch} aria-keyshortcuts="Control+K Meta+K"><Search size={17} /><span>Search chats</span><kbd>{mac ? '⌘ K' : 'Ctrl K'}</kbd></button>
       <nav className="workspace-nav" aria-label="Workspace">
         <div className="sidebar-label">WORKSPACE</div>
         <button type="button" className="nav-button" onClick={onPlugins}><Blocks size={17} /><span>Plugins</span></button>
         <button type="button" className="nav-button" onClick={onWebSearch}><Globe size={17} /><span>Web search</span></button>
         <button type="button" className="nav-button" onClick={onRepo}><GitBranch size={17} /><span>GitHub projects</span></button>
-        <button type="button" className="nav-button" onClick={onTasks}><ListTodo size={17} /><span>Background tasks</span></button>
+        {onTasks && <button type="button" className="nav-button" onClick={onTasks}><ListTodo size={17} /><span>Background tasks</span></button>}
         <button type="button" className="nav-button" onClick={onImage}><ImagePlus size={17} /><span>Image Studio</span></button>
         <button type="button" className="nav-button" onClick={onMemory}><Brain size={17} /><span>Memory</span>{memoryOn && <small className="memory-indicator">On</small>}</button>
       </nav>
@@ -54,7 +54,7 @@ export function Sidebar({ threads, activeId, availability, temporary, memoryOn, 
       </button>
       <button type="button" className="workspace-settings" onClick={onSettings} aria-label="Workspace settings">
         <span className="workspace-avatar" aria-hidden="true"><UserRound size={16} /></span>
-        <span className="workspace-profile"><strong>Personal workspace</strong><small>{signedIn ? 'Account history on this device' : 'History on this device'}</small></span>
+        <span className="workspace-profile"><strong>Personal workspace</strong><small>{signedIn ? syncLabel : 'History on this device'}</small></span>
         <Settings2 size={16} className="settings-icon" />
       </button>
     </div>

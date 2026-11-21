@@ -3,12 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="Send a streaming reply request to the Xyvora AI text API with curl or your backend." />
-    <meta name="theme-color" content="#f8f7fb" />
-    <link rel="icon" type="image/png" sizes="64x64" href="/brand/xyvora-icon.png" />
-    <link rel="canonical" href="https://xyvora.net/developers" />
+    {{PAGE_META}}
     <link rel="stylesheet" href="/src/info.css" />
-    <title>Developer API · Xyvora AI</title>
   </head>
   <body class="info-page page-developers">
     {{INFO_HEADER}}
@@ -26,7 +22,23 @@
         <pre class="api-code"><code>curl -N https://xyvora.net/api/chat \
   -H 'Content-Type: application/json' \
   -d '{"model":"xyvora","mode":"instant","messages":[{"role":"user","content":"Explain why leaves change color."}]}'</code></pre>
-        <div class="info-downloads"><a class="info-button" href="/openapi.json" download>Download OpenAPI ↓</a><a class="info-button info-button-secondary" href="/api/chat">View service status</a></div>
+        <div class="info-downloads"><a class="info-button" href="/openapi.json" download>Download OpenAPI ↓</a><a class="info-button info-button-secondary" href="/status">View service status</a></div>
+      </section>
+      <section class="info-section info-card" aria-labelledby="playground-title">
+        <p class="info-eyebrow">PLAYGROUND</p>
+        <h2 id="playground-title">Try the API</h2>
+        <p>Send one prompt to the public endpoint and watch the response stream. This doesn’t save a chat or use account memory. Don’t include private information.</p>
+        <noscript><p>Enable JavaScript to use the playground, or run the curl example above.</p></noscript>
+        <form id="api-playground" class="playground" hidden>
+          <label class="info-field">Prompt <textarea name="prompt" rows="3" required maxlength="6000">Explain why leaves change color.</textarea></label>
+          <div class="info-downloads playground-controls">
+            <label class="info-field">Reply mode <select name="mode" aria-label="Reply mode"></select></label>
+            <button type="submit" class="info-button">Run request</button>
+            <button type="button" class="info-button info-button-secondary" id="stop-request" hidden>Stop</button>
+          </div>
+          <p id="playground-state" class="playground-state" role="status">Ready to send a request.</p>
+          <pre id="playground-output" class="api-code playground-output" tabindex="0" aria-label="API response" hidden></pre>
+        </form>
       </section>
       <section class="info-section info-card" aria-labelledby="request-title">
         <h2 id="request-title">Request fields</h2>
@@ -52,5 +64,7 @@
       </section>
     </main>
     {{INFO_FOOTER}}
+    <script type="module" src="/src/developers-page.ts"></script>
+    <script type="module" src="/src/site-page.ts"></script>
   </body>
 </html>

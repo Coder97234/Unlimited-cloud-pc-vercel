@@ -1,8 +1,13 @@
-import { createHash, randomBytes, randomUUID, scrypt, timingSafeEqual } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { ACCOUNT_AUTH_PATHS, guestAccount, isAccountId, isAccountProvider } from '../shared/account.ts';
 import type { AccountProvider, AccountStatus, PublicAccount } from '../shared/account.ts';
 import { emptyMemory, parseMemory } from '../shared/memory.ts';
 import { XYVORA_URL } from '../shared/site.ts';
+import { MAX_CLOUD_HISTORY_BYTES } from '../shared/history.ts';
+import { accountMailer, hashToken, newToken, passwordLogin, redeemEmailLink, sendEmailLink, tokenPattern } from './account-email.ts';
+import type { SendAccountMail } from './account-email.ts';
+import { changeHistory, changePreferences, readHistory, readPreferences } from './account-storage.ts';
+import { workerIsOnline } from './worker-health.ts';
 import { productionDb } from './database.ts';
 import type { PlatformDb } from './database.ts';
 import { asObject, boundedJson, providerJson, shortText, ToolError } from './workspace-http.ts';
@@ -13,13 +18,11 @@ const routes = {
   github: { token: 'https://github.com/login/oauth/access_token', profile: 'https://api.github.com/user', scope: 'read:user', pkce: true },
   discord: { token: 'https://discord.com/api/oauth2/token', profile: 'https://discord.com/api/users/@me', scope: 'identify', pkce: false },
 } as const;
-export type AccountConfig = { origin: string; db: PlatformDb; clients: Partial<Record<AccountProvider, { id: string; secret: string }>>; passwords: boolean; background: boolean };
+export type AccountConfig = { origin: string; db: PlatformDb; clients: Partial<Record<AccountProvider, { id: string; secret: string }>>; passwords: boolean; background: boolean; mail?: SendAccountMail; authSecret: string };
 const day = 86_400_000;
-const random = () => randomBytes(32).toString('base64url');
-export const digest = (value: string) => createHash('sha256').update(value).digest('hex');
-const tokenPattern = /^[\w-]{43}$/;
+export const digest = hashToken;
 
-export function accountConfig(env: Env, db = productionDb(env), previewOrigin?: string): AccountConfig | undefined {
+export function accountConfig(env: Env, db = productionDb(env), previewOrigin?: string, mail = accountMailer(env)): AccountConfig | undefined {
   if (!db) return;
   const origin = env.XYVORA_ACCOUNT_ORIGIN?.trim() || previewOrigin || XYVORA_URL;
   try {
@@ -32,7 +35,8 @@ export function accountConfig(env: Env, db = productionDb(env), previewOrigin?: 
     const id = env[`${prefix}_ID`]?.trim(), secret = env[`${prefix}_SECRET`]?.trim();
     if (id && secret && origin.startsWith('https://')) clients[provider] = { id, secret };
   }
-  return { origin, db, clients, passwords: env.XYVORA_ENABLE_PASSWORDS === '1', background: env.XYVORA_ENABLE_BACKGROUND === '1' };
+  const authSecret = env.XYVORA_AUTH_SECRET?.trim() ?? '';
+  return { origin, db, clients, mail, authSecret, passwords: env.XYVORA_ENABLE_PASSWORDS === '1' && !!mail && authSecret.length >= 32, background: env.XYVORA_ENABLE_BACKGROUND === '1' };
 }
 
 const cookieName = (config: AccountConfig, name: 'session' | 'oauth') => `${config.origin.startsWith('https:') ? '__Host-' : ''}xyvora-${name}`;
@@ -52,20 +56,22 @@ export async function verifiedAccount(request: Request, config: AccountConfig): 
   if (new URL(request.url).origin !== config.origin) return null;
   const session = readCookie(request, config, 'session');
   if (!session) return null;
-  const [user] = await config.db.query<PublicAccount>(`select a.id, a.name, a.email from xyvora_sessions s join xyvora_accounts a on a.id = s.account_id where s.digest = $1 and s.expires_ms > $2`, [digest(session), Date.now()]);
+  const [user] = await config.db.query<PublicAccount>(`select a.id, a.name, a.email from xyvora_sessions s join xyvora_accounts a on a.id = s.account_id where s.digest = $1 and s.expires_ms > $2 and s.credential_version = a.credential_version`, [digest(session), Date.now()]);
   return user ?? null;
 }
-async function createSession(headers: Headers, request: Request, config: AccountConfig, account: PublicAccount) {
-  const session = random();
-  await config.db.query('delete from xyvora_sessions where expires_ms <= $1', [Date.now()]);
+async function createSession(headers: Headers, request: Request, config: AccountConfig, account: PublicAccount, expectedVersion?: number) {
+  const session = newToken();
+  const now = Date.now();
   const old = readCookie(request, config, 'session');
-  await config.db.query(`with revoked as (delete from xyvora_sessions where digest = $4)
-    insert into xyvora_sessions (digest, account_id, expires_ms) values ($1, $2, $3)`, [digest(session), account.id, Date.now() + 30 * day, old ? digest(old) : null]);
+  const created = await config.db.query(`with revoked as (delete from xyvora_sessions where digest=$4)
+    insert into xyvora_sessions (digest,account_id,expires_ms,credential_version)
+    select $1,id,$3,credential_version from xyvora_accounts where id=$2 and ($5::integer is null or credential_version=$5) returning digest`,
+    [digest(session), account.id, now + 30 * day, old ? digest(old) : null, expectedVersion ?? null]);
+  if (!created.length) throw new ToolError('Sign in again with your current credentials.', 401);
   writeCookie(headers, config, 'session', session, 30 * 86_400);
 }
 
 let resetAt = 0;
-let runningHashes = 0;
 const hits = new Map<string, number>();
 function limitAuth(request: Request, group: 'account' | 'login') {
   const now = Date.now();
@@ -77,37 +83,10 @@ function limitAuth(request: Request, group: 'account' | 'login') {
   hits.set(key, n + 1); hits.set(all, total + 1);
 }
 
-async function passwordDigest(password: string, salt: string) {
-  if (runningHashes >= 3) throw new ToolError('Sign-in is busy. Try again in a moment.', 429);
-  runningHashes++;
-  try { return await new Promise<Buffer>((resolve, reject) => scrypt(password, salt, 64, { N: 32768, r: 8, p: 1, maxmem: 64 * 1024 * 1024 }, (error, key) => error ? reject(error) : resolve(key))); }
-  finally { runningHashes--; }
-}
-async function localLogin(config: AccountConfig, input: Record<string, unknown>, register: boolean) {
-  if (!config.passwords) throw new ToolError('Xyvora password accounts are disabled on this deployment.', 503);
-  const username = typeof input.username === 'string' ? input.username.trim().toLowerCase() : '';
-  const password = input.password;
-  if (!/^[a-z0-9][a-z0-9_-]{2,23}$/.test(username) || typeof password !== 'string' || password.length < 12 || password.length > 128) throw new ToolError('Use a 3–24 character username and a password between 12 and 128 characters.');
-  if (register) {
-    const salt = randomBytes(18).toString('hex');
-    const key = await passwordDigest(password, salt);
-    const [created] = await config.db.query<PublicAccount>(`insert into xyvora_accounts (id, provider, subject, name, password_hash, created_ms)
-      values ($1, 'password', $2, $2, $3, $4) on conflict (provider, subject) do nothing returning id, name, email`, [randomUUID(), username, `${salt}:${key.toString('hex')}`, Date.now()]);
-    if (!created) throw new ToolError('That username is unavailable.', 409);
-    return created;
-  }
-  const [row] = await config.db.query<PublicAccount & { password_hash: string }>(`select id, name, email, password_hash from xyvora_accounts where provider = 'password' and subject = $1`, [username]);
-  const [salt, saved] = row?.password_hash?.split(':') ?? ['0'.repeat(36), '0'.repeat(128)];
-  const key = await passwordDigest(password, salt);
-  const expected = Buffer.from(saved ?? '', 'hex');
-  if (!row || expected.length !== key.length || !timingSafeEqual(key, expected)) throw new ToolError('Username or password was incorrect.', 401);
-  return { id: row.id, name: row.name, email: row.email };
-}
-
 async function beginOauth(config: AccountConfig, headers: Headers, provider: AccountProvider) {
   const client = config.clients[provider];
-  if (!client) throw new ToolError('That sign-in option is not configured.', 503);
-  const state = random(), verifier = random();
+  if (!client) throw new ToolError('That sign-in method is unavailable.', 503);
+  const state = newToken(), verifier = newToken();
   const now = Date.now();
   await config.db.query('delete from xyvora_auth_attempts where expires_ms <= $1', [now]);
   await config.db.query('insert into xyvora_auth_attempts (digest, provider, verifier, expires_ms) values ($1,$2,$3,$4)', [digest(state), provider, verifier, now + 600_000]);
@@ -145,37 +124,72 @@ async function finishOauth(request: Request, headers: Headers, config: AccountCo
   return true;
 }
 
-export async function handleAccount(request: Request, config: AccountConfig | undefined, { limit = true } = {}) {
+export async function handleAccount(request: Request, config: AccountConfig | undefined, { limit = true, schedule }: { limit?: boolean; schedule?: (work: Promise<void>) => void } = {}) {
   const url = new URL(request.url);
   const headers = new Headers({ 'Cache-Control': 'private, no-store, max-age=0', 'Referrer-Policy': 'no-referrer', 'X-Content-Type-Options': 'nosniff' });
   const json = (data: object, status = 200) => Response.json(data, { status, headers });
-  const callback = request.method === 'GET' && ['code', 'error', 'state'].some((name) => url.searchParams.has(name));
+  const section = url.searchParams.get('section');
+  const callback = !section && request.method === 'GET' && ['code', 'error', 'state'].some((name) => url.searchParams.has(name));
   const toHome = (success: boolean) => { headers.set('Location', `/?account=${success ? 'signed-in' : 'failed'}`); return new Response(null, { status: 303, headers }); };
-  const memory = url.searchParams.get('section') === 'memory';
   try {
     if (request.method !== 'GET' && request.method !== 'POST') { headers.set('Allow', 'GET, POST'); throw new ToolError('Method not allowed.', 405); }
+    if (section && !['history', 'settings', 'memory'].includes(section)) throw new ToolError('Account section not found.', 404);
     if (!config || url.origin !== config.origin) {
       if (callback) return toHome(false);
-      if (request.method === 'GET' && !memory) return json(guestAccount());
-      throw new ToolError('Sign-in is not configured on this site.', 503);
+      if (request.method === 'GET' && !section) return json(guestAccount());
+      throw new ToolError('Account services are unavailable.', 503);
     }
     if (callback) { if (limit) limitAuth(request, 'login'); return toHome(await finishOauth(request, headers, config)); }
+    let user: PublicAccount | null | undefined;
     let input: Record<string, unknown> | undefined;
     if (request.method === 'POST') {
       sameOriginJson(request, config.origin);
-      try { input = asObject(await boundedJson(request, 6_000)); }
+      if (section) {
+        if (limit) limitAuth(request, 'account');
+        user = await verifiedAccount(request, config);
+        if (!user) throw new ToolError('Sign in to use account storage.', 401);
+        if (request.headers.get('x-xyvora-account') !== user.id) throw new ToolError('Your account changed. Refresh and try again.', 409);
+      }
+      const bytes = section === 'history' ? MAX_CLOUD_HISTORY_BYTES + 1_000 : section === 'memory' ? 65_536 : 6_000;
+      try { input = asObject(await boundedJson(request, bytes)); }
       catch (error) { throw error instanceof ToolError ? error : new ToolError('Send a valid account request.'); }
-      if (limit) limitAuth(request, ['register', 'login', 'start'].includes(String(input.action)) ? 'login' : 'account');
-      if (input.action === 'start' && isAccountProvider(input.provider)) return json({ url: await beginOauth(config, headers, input.provider) });
-      if (input.action === 'register' || input.action === 'login') {
-        const user = await localLogin(config, input, input.action === 'register');
-        await createSession(headers, request, config, user);
-        return json({ signedIn: true });
+      if (!section) {
+        const action = input.action;
+        const credentials = ['login', 'request-signup', 'request-reset', 'verify-email', 'reset-password'].includes(String(action));
+        if (limit) limitAuth(request, credentials || action === 'start' ? 'login' : 'account');
+        if (action === 'start' && isAccountProvider(input.provider)) return json({ url: await beginOauth(config, headers, input.provider) });
+        if (credentials && (!config.passwords || !config.mail)) throw new ToolError('Email sign-in is unavailable.', 503);
+        if (action === 'login') {
+          const account = await passwordLogin(config.db, config.authSecret, input, limit);
+          await createSession(headers, request, config, account, account.credential_version);
+          return json({ signedIn: true });
+        }
+        if (action === 'request-signup' || action === 'request-reset') {
+          await sendEmailLink(config.db, config.origin, config.mail!, config.authSecret, request, action === 'request-signup' ? 'signup' : 'reset', input.email, limit, schedule);
+          return json({ accepted: true }, 202);
+        }
+        if (action === 'verify-email' || action === 'reset-password') {
+          const account = await redeemEmailLink(config.db, action === 'verify-email' ? 'signup' : 'reset', input);
+          if (account) {
+            await createSession(headers, request, config, account, account.credential_version);
+            return json({ signedIn: true });
+          }
+          // The reset invalidates only the target account’s sessions. A
+          // cookie for an unrelated account must not be silently signed out.
+          return json({ reset: true });
+        }
       }
     } else if (limit && readCookie(request, config, 'session')) limitAuth(request, 'account');
-    const user = await verifiedAccount(request, config);
-    if (request.method === 'GET' && !memory) return json({ providers: Object.keys(config.clients).filter(isAccountProvider), passwords: config.passwords, background: config.background, user } satisfies AccountStatus);
-    if (input?.action === 'sign-out' && !memory) {
+    user ??= await verifiedAccount(request, config);
+    if (request.method === 'GET' && !section) {
+      const providers = Object.keys(config.clients).filter(isAccountProvider);
+      // Do not advertise account forms before storage is reachable and the
+      // launch migration has been installed.
+      if (!user && (providers.length || config.passwords)) await config.db.query('select 1 from xyvora_cloud_history limit 0');
+      const background = config.background && !!(user || providers.length || config.passwords) && await workerIsOnline(config.db).catch(() => false);
+      return json({ providers, passwords: config.passwords, background, user, ...(user && { settings: await readPreferences(config.db, user.id) }) } satisfies AccountStatus);
+    }
+    if (input?.action === 'sign-out' && !section) {
       if (user && request.headers.get('x-xyvora-account') !== user.id) throw new ToolError('Your account changed. Refresh and try again.', 409);
       const session = readCookie(request, config, 'session'), attempt = readCookie(request, config, 'oauth');
       if (session) await config.db.query('delete from xyvora_sessions where digest = $1', [digest(session)]);
@@ -186,18 +200,28 @@ export async function handleAccount(request: Request, config: AccountConfig | un
     }
     if (!user || !isAccountId(user.id)) throw new ToolError('Sign in to use account storage.', 401);
     if (request.headers.get('x-xyvora-account') !== user.id) throw new ToolError('Your account changed. Refresh and try again.', 409);
-    if (!memory && input?.action === 'delete-account' && input.confirm === 'DELETE') {
-      await config.db.query('delete from xyvora_accounts where id = $1', [user.id]);
+    if (!section && input?.action === 'delete-account' && input.confirm === 'DELETE') {
+      await config.db.query(`with removed as (delete from xyvora_accounts where id=$1 returning provider, subject)
+        delete from xyvora_email_links l using removed r where r.provider='password' and l.email=r.subject`, [user.id]);
       writeCookie(headers, config, 'session', '', 0);
       writeCookie(headers, config, 'oauth', '', 0);
       return json({ deleted: true });
     }
-    if (request.method === 'GET' && memory) {
-      const [row] = await config.db.query<{ profile: unknown }>('select profile from xyvora_memory where account_id = $1', [user.id]);
-      return json({ profile: row ? parseMemory(row.profile) ?? emptyMemory() : emptyMemory() });
+    if (section === 'history') {
+      if (request.method === 'GET') return json(await readHistory(config.db, user.id));
+      if (input?.action === 'sync') {
+        const result = await changeHistory(config.db, user.id, input.revision, input.chats);
+        return json(result, 'conflict' in result ? 409 : 200);
+      }
     }
-    if (!memory || input?.action !== 'save-memory') throw new ToolError('Unknown account action.');
-    const profile = parseMemory(input.profile);
+    if (section === 'settings' && input?.action === 'save-settings') return json({ settings: await changePreferences(config.db, user.id, input.settings) });
+    if (section === 'settings' && request.method === 'GET') return json({ settings: await readPreferences(config.db, user.id) });
+    if (section === 'memory' && request.method === 'GET') {
+      const [row] = await config.db.query<{ profile: unknown }>('select profile from xyvora_memory where account_id = $1', [user.id]);
+      return json({ profile: row ? parseMemory(row.profile, true) ?? emptyMemory() : emptyMemory() });
+    }
+    if (section !== 'memory' || input?.action !== 'save-memory') throw new ToolError('Unknown account action.');
+    const profile = parseMemory(input.profile, true);
     if (!profile) throw new ToolError('Check the size and number of your memory notes.');
     if (!profile.enabled && !profile.notes.length) await config.db.query('delete from xyvora_memory where account_id = $1', [user.id]);
     else await config.db.query('insert into xyvora_memory (account_id, profile) values ($1,$2::jsonb) on conflict (account_id) do update set profile = excluded.profile', [user.id, JSON.stringify(profile)]);
@@ -206,6 +230,6 @@ export async function handleAccount(request: Request, config: AccountConfig | un
     if (callback) return toHome(false);
     const status = error instanceof ToolError ? error.status : 503;
     if (status === 429) headers.set('Retry-After', '60');
-    return json({ error: error instanceof ToolError ? error.message : 'The account service is unavailable.' }, status);
+    return json({ error: error instanceof ToolError ? error.message : 'Account services are unavailable. Try again shortly.' }, status);
   }
 }

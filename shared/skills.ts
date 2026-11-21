@@ -1,6 +1,6 @@
 import { ABOUT_URL, TEAM, TEAM_LINK_LABEL, TEAM_NAME } from './site.ts';
 import { compareLists, csvSummary, encodeText, jsonPointer } from './data-tools.ts';
-import { PLUGINS, workspaceIntent } from './workspace-tools.ts';
+import { isProvider, PLUGINS, workspaceIntent } from './workspace-tools.ts';
 import { calculate, naturalCalculation } from './calculator.ts';
 import { conversionArgument, convert } from './convert.ts';
 import { MAX_ATTACHMENT, MAX_CONTEXT, XYVORA_NAME, XYVORA_SITE, XYVORA_URL, withAttachment } from './models.ts';
@@ -88,7 +88,7 @@ export type InstantResult = { id: SkillResultId; text: string };
 export function runInstantSkill(prompt: string, attachedText?: string): InstantResult | undefined {
   if (prompt.length > MAX_CONTEXT || (attachedText?.length ?? 0) > MAX_ATTACHMENT) return;
   const external = workspaceIntent(prompt);
-  if (external) return { id: 'skills', text: `Open **${PLUGINS[external.id].name}** in the Xyvora workspace to review and run this request. I haven’t run it here.` };
+  if (external) return { id: 'skills', text: `Open Plugins in the Xyvora workspace to review available tools. I haven’t run this request.` };
   const explicit = readSkillCommand(prompt);
   let id = explicit?.id ?? directInfoSkill(prompt);
   let argument = explicit?.argument ?? '';
@@ -111,7 +111,7 @@ export function runInstantSkill(prompt: string, attachedText?: string): InstantR
   }
   switch (id) {
     case 'about': return { id, text: `${identity} I was built by the **${TEAM_NAME}**.\n\n${TEAM.map(({ name, role }) => `- **${name}** — ${role}`).join('\n')}\n\n[${TEAM_LINK_LABEL}](${ABOUT_URL}).` };
-    case 'skills': return { id, text: `${identity}\n\nHere are the tools on ${XYVORA_SITE}:\n\n${SKILL_IDS.filter((key) => key !== 'about').map((key) => `- **${SKILLS[key].name}** · \`/${key}\` — ${SKILLS[key].description}`).join('\n')}\n\n**Plugins (review before running):**\n${Object.values(PLUGINS).map((plugin) => `- **${plugin.name}** · \`${plugin.example}\``).join('\n')}` };
+    case 'skills': return { id, text: `${identity}\n\nHere are the tools on ${XYVORA_SITE}:\n\n${SKILL_IDS.filter((key) => key !== 'about').map((key) => `- **${SKILLS[key].name}** · \`/${key}\` — ${SKILLS[key].description}`).join('\n')}\n\n**Plugins (review before running):**\n${Object.entries(PLUGINS).filter(([key]) => !isProvider(key)).map(([, plugin]) => `- **${plugin.name}** · \`${plugin.example}\``).join('\n')}` };
     case 'calc': return { id, text: calculate(argument) };
     case 'convert': return { id, text: convert(argument) };
     case 'split': return { id, text: splitBill(argument) };

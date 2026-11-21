@@ -18,7 +18,10 @@ const endpoint = origin + accountPath;
 const memoryPath = `${accountPath}?section=memory`;
 const ada = { id: '11111111-1111-4111-8111-111111111111', email: 'ada@example.invalid' };
 const ben = { id: '22222222-2222-4222-8222-222222222222', email: 'ben@example.invalid' };
-const noDb = { async query(): Promise<never> { return assert.fail('should not query storage on status or rejected request'); } };
+const noDb = { async query(sql: string): Promise<never[]> {
+  assert.equal(sql, 'select 1 from xyvora_cloud_history limit 0', 'only the schema check is expected');
+  return [];
+} };
 
 test('account storage is optional and requires an exact production HTTPS origin', async () => {
   assert.equal(accountConfig({}), undefined);
@@ -34,7 +37,7 @@ test('account storage is optional and requires an exact production HTTPS origin'
   assert.equal((await issue(new Request(origin + memoryPath))).status, 401);
   assert.equal((await issue(platformPost(accountPath, { action: 'start', provider: 'google' }, { Origin: 'https://outside.invalid' }))).status, 403);
   assert.equal((await issue(platformPost(accountPath, { action: 'start', provider: 'google' }, { 'Content-Type': 'text/plain' }))).status, 415);
-  assert.equal((await issue(platformPost(accountPath, { action: 'register', username: 'sample', password: 'test-password' }))).status, 503);
+  assert.equal((await issue(platformPost(accountPath, { action: 'request-signup', email: 'test@example.invalid' }))).status, 503);
   assert.equal((await issue(platformPost(accountPath, { action: 'start', provider: 'google', extra: 'x'.repeat(6_000) }))).status, 413);
   const missing = await issue(new Request(`${endpoint}?code=missing-state&next=https://outside.invalid`));
   assert.equal(missing.status, 303);
@@ -143,26 +146,62 @@ test('Google and GitHub fixture sign-in verifies PKCE, consumes state, and isola
   assert.equal(await status(b), null);
 });
 
-test('password accounts require opt-in and use salted hashes with revocable sessions', async (t) => {
+test('verified email signup, password sign-in and reset use single-use links and revoke old sessions', async (t) => {
   const db = await platformFixture(t);
-  const config = accountConfig({ XYVORA_ACCOUNT_ORIGIN: origin, XYVORA_ENABLE_PASSWORDS: '1' }, db)!;
-  const jar = new CookieJar();
-  const secret = 'long-fixture-password';
-  const submit = (action: string, password = secret, headers = jar.headers()) => handleAccount(platformPost(accountPath, { action, username: 'Local-Writer', password }, headers), config, { limit: false });
-  assert.equal((await submit('register', 'short')).status, 400);
-  const created = await submit('register');
+  const mail: { to: string; subject: string; text: string }[] = [];
+  const config = accountConfig({ XYVORA_ACCOUNT_ORIGIN: origin, XYVORA_ENABLE_PASSWORDS: '1', XYVORA_AUTH_SECRET: 'fixture'.repeat(6) }, db, undefined, async (message) => { mail.push(message); })!;
+  const jar = new CookieJar(), other = new CookieJar();
+  const password = 'fixture-starting-password', replacement = 'fixture-replacement-password';
+  const email = 'fixture@example.invalid';
+  const issue = (request: Request) => handleAccount(request, config, { limit: false });
+  const post = (action: string, fields: object = {}, cookies = jar) => issue(platformPost(accountPath, { action, ...fields }, cookies.headers()));
+  const status = async (cookies = jar) => (await (await issue(new Request(endpoint, { headers: cookies.headers() }))).json());
+  const sent = async (action: string, email: string) => {
+    const response = await post(action, { email });
+    assert.equal(response.status, 202);
+    assert.deepEqual(await response.json(), { accepted: true });
+  };
+  const link = (index: number, purpose: string) => {
+    assert.equal(mail[index].to, email);
+    return mail[index].text.match(new RegExp(`/\\#${purpose}=([\\w-]{43})`))![1];
+  };
+  assert.equal((await status()).passwords, true);
+  await sent('request-reset', email);
+  assert.deepEqual(mail, []);
+  await sent('request-signup', 'Fixture@example.invalid');
+  const verify = link(0, 'signup');
+  assert.equal((await db.query('select * from xyvora_accounts')).length, 0);
+  assert.doesNotMatch(JSON.stringify(await db.query('select * from xyvora_email_links')), new RegExp(verify));
+  assert.equal((await post('verify-email', { token: verify, password: 'short' })).status, 400);
+  assert.equal((await post('reset-password', { token: verify, password })).status, 400);
+  const created = await post('verify-email', { token: verify, password });
+  assert.equal(created.status, 200);
   assert.deepEqual(await created.json(), { signedIn: true });
   jar.update(created);
-  const status = await handleAccount(new Request(endpoint, { headers: jar.headers() }), config);
-  assert.equal((await status.json()).user.name, 'local-writer');
-  assert.equal((await submit('register')).status, 409);
-  assert.equal((await submit('login', 'incorrect-password')).status, 401);
+  assert.equal((await status()).user.email, email);
+  assert.equal((await post('verify-email', { token: verify, password })).status, 400);
+  await sent('request-signup', email);
+  assert.equal(mail.length, 1);
+  assert.equal((await post('login', { email, password: 'incorrect-password' })).status, 401);
+  const login = await post('login', { email, password }, other);
+  assert.equal(login.status, 200);
+  other.update(login);
+  assert.equal((await status(other)).user.id, (await status()).user.id);
   const [row] = await db.query('select * from xyvora_accounts');
   assert.match(String(row.password_hash), /^[0-9a-f]{36}:[0-9a-f]{128}$/);
-  assert.doesNotMatch(JSON.stringify(row), /long-fixture-password/);
-  assert.equal((await submit('login')).status, 200);
-  const old = await handleAccount(new Request(endpoint, { headers: jar.headers() }), config);
-  assert.equal((await old.json()).user, null);
+  assert.doesNotMatch(JSON.stringify(row), /fixture-starting-password/);
+  await sent('request-reset', email);
+  const stale = link(1, 'reset');
+  await db.query("update xyvora_email_links set expires_ms=0 where purpose='reset'");
+  assert.equal((await post('reset-password', { token: stale, password: replacement })).status, 400);
+  await sent('request-reset', email);
+  const reset = link(2, 'reset');
+  const attempts = await Promise.all([post('reset-password', { token: reset, password: replacement }), post('reset-password', { token: reset, password: replacement })]);
+  assert.deepEqual(attempts.map((response) => response.status).sort(), [200, 400]);
+  assert.equal((await status()).user, null);
+  assert.equal((await status(other)).user, null);
+  assert.equal((await post('login', { email, password })).status, 401);
+  assert.equal((await post('login', { email, password: replacement })).status, 200);
 });
 
 test('guest notes are opt-in, editable, disabled/cleared locally and never merged with account chat storage', async (t) => {

@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { PUBLIC_PAGES } from '../server/public-pages.ts';
 import { MODE_IDS } from '../shared/modes.ts';
 import { MAX_SEARCH_QUERY } from '../shared/search.ts';
-import { ABOUT_PATH, SCHOOLS_PATH, SITE_DESCRIPTION, TEAM, XYVORA_SLOGAN, XYVORA_URL } from '../shared/site.ts';
+import { ABOUT_PATH, SITE_DESCRIPTION, SITE_LINKS, TEAM, XYVORA_SLOGAN, XYVORA_URL } from '../shared/site.ts';
 
 const target = process.argv[2];
 async function read(path, file, expectedType) {
@@ -22,18 +22,25 @@ assert.deepEqual(Array.from(sitemap.matchAll(/<loc>([^<]*)<\/loc>/g), (match) =>
 const robots = await read('/robots.txt', 'robots.txt', /^text\/plain\b/i);
 assert.ok(robots.includes(`Sitemap: ${XYVORA_URL}/sitemap.xml`));
 assert.doesNotMatch(robots, /^Disallow:\s*\/\s*$/m);
-for (const [path, file] of pages) {
+for (const [path, file, title, description] of pages) {
   const html = await read(path, file, /^text\/html\b/i);
   assert.ok(html.includes(`rel="canonical" href="${XYVORA_URL}${path}"`), `${path} needs its canonical URL`);
-  assert.doesNotMatch(html, /\{\{[A-Z_]+\}\}|qwen/i);
+  assert.doesNotMatch(html, /\{\{[A-Z_]+\}\}|qwen|Roblox Game Development Group/i);
+  assert.ok(html.includes(`<title>${title}</title>`), `${path} needs a current title`);
+  for (const tag of ['name="description"', 'property="og:description"', 'name="twitter:description"']) {
+    assert.ok(html.includes(`${tag} content="${description}"`), `${path} needs ${tag}`);
+  }
+  for (const key of ['og:title', 'og:image', 'og:url', 'twitter:title', 'twitter:image', 'twitter:card']) {
+    assert.match(html, new RegExp(`(?:name|property)="${key}" content="[^"<>]+"`), `${path} missing ${key}`);
+  }
+  const footer = /<footer[^>]*>[\s\S]*?<\/footer>/.exec(html)?.[0] ?? '';
+  assert.deepEqual(Array.from(footer.matchAll(/<a[^>]*href="([^"]+)"[^>]*>([^<]+)<\/a>/g), (match) => match.slice(1)), SITE_LINKS, `${path} footer links`);
+  assert.match(html, /src="\/theme\.js"/, `${path} needs the shared theme bootstrap`);
   if (path === '/') {
-    assert.ok(html.includes(`name="description" content="${SITE_DESCRIPTION}"`));
-    assert.ok(html.includes(XYVORA_SLOGAN));
-    assert.ok(html.includes(`<a href="${ABOUT_PATH}">`));
-    assert.ok(html.includes(`<a href="${SCHOOLS_PATH}">`));
+    assert.ok(html.includes(SITE_DESCRIPTION) && html.includes(XYVORA_SLOGAN));
   } else {
-    if (!['/analytics', '/cookies'].includes(path)) assert.doesNotMatch(html, /<script\b/i, `${path} must render without JavaScript`);
     assert.doesNotMatch(html, /mailto:/i, 'Do not publish unverified employee addresses');
+    assert.match(html, /<main[^>]*>[\s\S]*?<h1\b/, `${path} primary content must render without JS`);
   }
   if (path === ABOUT_PATH) for (const { name, role } of TEAM) assert.ok(html.includes(`<h3>${name}</h3><p>${role}</p>`));
 }
@@ -47,4 +54,4 @@ if (target) {
   assert.equal(missing.status, 404, 'Unknown public paths should not return the chat homepage');
   await missing.body?.cancel();
 }
-console.log(`XYVORA_SITE ${pages.length} canonical pages, sitemap, robots, homepage slogan, and static team credits passed`);
+console.log(`XYVORA_SITE ${pages.length} canonical pages, sitemap, robots, shared footer, theme boot, social metadata, and static team credits passed`);
