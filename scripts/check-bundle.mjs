@@ -45,7 +45,10 @@ async function check(label, content, expected, { timeZone = 'UTC', searchQuery, 
   if (skill) assert.equal(response.headers.get('x-xyvora-skill'), skill);
   let text = '', first, count = 0, sources;
   await readChatEvents(response.body, (part) => { if (part.trim()) first ??= performance.now() - start; count++; text += part; }, true, (value) => { sources = value; });
-  assert.ok(Number.isFinite(first) && count >= (source === 'server' ? 2 : 1));
+  // The creator guard releases complete sentences, so a short native answer
+  // can legitimately be one SSE delta. tests/chat.test.ts checks early release
+  // while a later sentence is still generating; readChatEvents requires [DONE].
+  assert.ok(Number.isFinite(first), `${label}: no nonempty streamed text`);
   assert.match(text, expected);
   assert.doesNotMatch(text, /qwen/i);
   if (searchQuery) assert.ok(sources?.some(({ title }) => /artemis/i.test(title)));
