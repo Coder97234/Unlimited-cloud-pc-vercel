@@ -1,6 +1,6 @@
-import { ABOUT_URL, TEAM, TEAM_LINK_LABEL, TEAM_NAME } from './site.ts';
+import { mentionsCreator, teamCredits, verifiedTeamReply } from './creator-policy.ts';
 import { compareLists, csvSummary, encodeText, jsonPointer } from './data-tools.ts';
-import { isProvider, PLUGINS, workspaceIntent } from './workspace-tools.ts';
+import { isProvider, PLUGINS, WORKSPACE_PLUGINS_ENABLED, workspaceIntent } from './workspace-tools.ts';
 import { calculate, naturalCalculation } from './calculator.ts';
 import { conversionArgument, convert } from './convert.ts';
 import { MAX_ATTACHMENT, MAX_CONTEXT, XYVORA_NAME, XYVORA_SITE, XYVORA_URL, withAttachment } from './models.ts';
@@ -85,10 +85,21 @@ const identity = `I’m **${XYVORA_NAME}**, the AI assistant at [${XYVORA_SITE}]
 const calendarQuestion = /^(?:(?:how many )?days (?:are there )?between |what day (?:of the week )?is )(.+)$/i;
 
 export type InstantResult = { id: SkillResultId; text: string };
+export function teamAnswerSkill(prompt: string): InstantResult | undefined {
+  const command = readSkillCommand(prompt)?.id;
+  if (command === 'about' || directInfoSkill(prompt) === 'about') return { id: 'about', text: `${identity}\n\n${teamCredits}` };
+  // Local transformations are labeled tool results, not opinions in chat.
+  if (command === 'skills' || (command && command !== 'search' && SKILLS[command].group !== 'writing')) return;
+  if (mentionsCreator(prompt)) return { id: 'about', text: verifiedTeamReply };
+}
 export function runInstantSkill(prompt: string, attachedText?: string): InstantResult | undefined {
   if (prompt.length > MAX_CONTEXT || (attachedText?.length ?? 0) > MAX_ATTACHMENT) return;
+  const team = teamAnswerSkill(prompt);
+  if (team) return team;
   const external = workspaceIntent(prompt);
-  if (external) return { id: 'skills', text: `Open Plugins in the Xyvora workspace to review available tools. I haven’t run this request.` };
+  if (external) return { id: 'skills', text: WORKSPACE_PLUGINS_ENABLED
+    ? 'Open Plugins in the Xyvora workspace to review available tools. I haven’t run this request.'
+    : 'Plugins are paused. I haven’t run this request. Type `/tools` for built-in tools.' };
   const explicit = readSkillCommand(prompt);
   let id = explicit?.id ?? directInfoSkill(prompt);
   let argument = explicit?.argument ?? '';
@@ -110,8 +121,11 @@ export function runInstantSkill(prompt: string, attachedText?: string): InstantR
     else if (/^(?:please )?count (?:the )?words in (?:this|the|my) (?:attached )?(?:text|file|document)$/i.test(text)) id = 'text';
   }
   switch (id) {
-    case 'about': return { id, text: `${identity} I was built by the **${TEAM_NAME}**.\n\n${TEAM.map(({ name, role }) => `- **${name}** — ${role}`).join('\n')}\n\n[${TEAM_LINK_LABEL}](${ABOUT_URL}).` };
-    case 'skills': return { id, text: `${identity}\n\nHere are the tools on ${XYVORA_SITE}:\n\n${SKILL_IDS.filter((key) => key !== 'about').map((key) => `- **${SKILLS[key].name}** · \`/${key}\` — ${SKILLS[key].description}`).join('\n')}\n\n**Plugins (review before running):**\n${Object.entries(PLUGINS).filter(([key]) => !isProvider(key)).map(([, plugin]) => `- **${plugin.name}** · \`${plugin.example}\``).join('\n')}` };
+    case 'skills': {
+      const guide = SKILL_IDS.filter((key) => key !== 'about').map((key) => `- **${SKILLS[key].name}** · \`/${key}\` — ${SKILLS[key].description}`).join('\n');
+      const plugins = WORKSPACE_PLUGINS_ENABLED ? `\n\n**Plugins (review before running):**\n${Object.entries(PLUGINS).filter(([key]) => !isProvider(key)).map(([, plugin]) => `- **${plugin.name}** · \`${plugin.example}\``).join('\n')}` : '';
+      return { id, text: `${identity}\n\nHere are the tools on ${XYVORA_SITE}:\n\n${guide}${plugins}` };
+    }
     case 'calc': return { id, text: calculate(argument) };
     case 'convert': return { id, text: convert(argument) };
     case 'split': return { id, text: splitBill(argument) };

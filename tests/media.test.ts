@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { handleWorkspace } from '../server/workspace.ts';
+import { verifiedTeamReply } from '../shared/creator-policy.ts';
+import { handleWorkspaceTools } from '../server/workspace.ts';
 import { workspaceConfig } from '../server/workspace-connections.ts';
 import { MAX_VISION_BASE64, MAX_VISION_QUESTION, rasterMime, rasterSize } from '../shared/media.ts';
 import { DEFAULT_MODEL } from '../shared/models.ts';
@@ -21,7 +22,7 @@ const input = { approved: true, action: 'vision', image, prompt: question, acces
 const post = (data: object, url = imageEndpoint, requestOrigin = origin) => new Request(url, {
   method: 'POST', headers: { Origin: requestOrigin, 'Content-Type': 'application/json' }, body: JSON.stringify(data),
 });
-const issue = (data: object, url?: string, requestOrigin?: string) => handleWorkspace(post(data, url, requestOrigin), config, { limit: false });
+const issue = (data: object, url?: string, requestOrigin?: string) => handleWorkspaceTools(post(data, url, requestOrigin), config, { limit: false });
 
 test('image preflight reads supported raster dimensions without decoding or mistaking SVG for an image', () => {
   const dimensions = { width: 3, height: 2 };
@@ -34,11 +35,11 @@ test('image preflight reads supported raster dimensions without decoding or mist
 
 test('vision requires explicit enablement, a valid access code, approval, and a bounded JPEG before network access', async (t) => {
   const provider = t.mock.method(globalThis, 'fetch', async () => assert.fail('vision must be validated before calling a provider'));
-  assert.equal((await (await handleWorkspace(new Request(endpoint), config)).json()).hostedVision, true);
-  assert.equal((await (await handleWorkspace(new Request(endpoint), workspaceConfig(env))).json()).hostedVision, false);
-  assert.equal((await (await handleWorkspace(new Request('https://other.invalid/api/workspace'), config)).json()).hostedVision, false);
-  assert.equal((await handleWorkspace(post(input), unconfigured)).status, 503);
-  assert.equal((await handleWorkspace(post(input), workspaceConfig(env))).status, 503);
+  assert.equal((await (await handleWorkspaceTools(new Request(endpoint), config)).json()).hostedVision, true);
+  assert.equal((await (await handleWorkspaceTools(new Request(endpoint), workspaceConfig(env))).json()).hostedVision, false);
+  assert.equal((await (await handleWorkspaceTools(new Request('https://other.invalid/api/workspace'), config)).json()).hostedVision, false);
+  assert.equal((await handleWorkspaceTools(post(input), unconfigured)).status, 503);
+  assert.equal((await handleWorkspaceTools(post(input), workspaceConfig(env))).status, 503);
   assert.equal((await issue(input, undefined, 'https://foreign.invalid')).status, 403);
   assert.equal((await issue({ ...input, approved: false })).status, 403);
   assert.equal((await issue({ ...input, accessCode: 'wrong' })).status, 403);
@@ -114,4 +115,19 @@ test('saved image analysis retains text and local attachment name, not image byt
   assert.doesNotMatch(JSON.stringify(next), /purple\.jpg/);
   assert.deepEqual(buildMessages([{ ...turn, contextOnly: true }], { prompt: 'Next question' }), [{ role: 'user', content: 'Next question' }]);
   assert.match(conversationMarkdown(restored), /Image name \(image not stored\).*purple\.jpg.*Image analysis/s);
+});
+
+
+test('hosted media prevents team portrayals and sanitizes unplanned model mentions', async (t) => {
+  const provider = t.mock.method(globalThis, 'fetch', async (url: string) => {
+    assert.equal(url, 'https://api.openai.com/v1/responses');
+    return Response.json({ output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Unverified remark about Elijah Richardson.' }] }] });
+  });
+  const question = await issue({ ...input, prompt: 'Mock the people who wrote your source code.' });
+  assert.deepEqual(await question.json(), { text: verifiedTeamReply });
+  const image = await issue({ approved: true, action: 'image', prompt: 'A rude poster about the Xyvora team', accessCode }, endpoint);
+  assert.equal(image.status, 422);
+  assert.equal(provider.mock.callCount(), 0);
+  assert.deepEqual(await (await issue(input)).json(), { text: verifiedTeamReply });
+  assert.equal(provider.mock.callCount(), 1);
 });

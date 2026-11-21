@@ -2,6 +2,8 @@ export const XYVORA_NAME = 'Xyvora AI';
 export const XYVORA_SITE = 'xyvora.net';
 export const XYVORA_URL = `https://${XYVORA_SITE}`;
 export const XYVORA_SLOGAN = 'Think big. Leap ahead.';
+export const ORBIT_ASSET = '/brand/xyvora-orbit.svg';
+export const SOCIAL_ASSET = '/brand/xyvora-social.webp';
 export const SITE_DESCRIPTION = 'Xyvora AI is a free AI workspace for quick answers, learning, writing, and working with files. Chat and use built-in tools without an account.';
 export const ABOUT_PATH = '/about';
 export const SCHOOLS_PATH = '/schools';
@@ -14,5 +16,5 @@ export const TEAM_LINK_LABEL = 'Meet the Xyvora Team';
 export const TEAM = [
   { name: 'Ethan Bennett', role: 'Founder and coder', initials: 'EB' },
   { name: 'Noberto Dominguez', role: 'Designer', initials: 'ND' },
-  { name: 'Elijah Richardson', role: 'Unsure', initials: 'ER' },
+  { name: 'Elijah Richardson', role: 'Developer', initials: 'ER' },
 ] as const;

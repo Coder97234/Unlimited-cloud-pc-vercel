@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { readFile, readdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { chromium } from 'playwright-core';
+import { WORKSPACE_PLUGINS_ENABLED } from '../shared/workspace-tools.ts';
 
 const live = new URL(process.argv[2] ?? 'http://127.0.0.1:4184').origin;
 const guest = new URL(process.argv[3] ?? 'http://127.0.0.1:4185').origin;
@@ -12,6 +13,7 @@ const pages = ['/', '/about', '/schools', '/developers', '/analytics', '/terms',
 const footer = ['About', 'For schools', 'API', 'Analytics', 'Terms', 'Privacy', 'Cookies'];
 const browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined, args: ['--no-sandbox', '--disable-dev-shm-usage'] });
 const errors = [];
+const expectedAuthFailure = new WeakSet();
 let deviceIndex = 0;
 const close = (page) => page.getByRole('dialog').getByRole('button', { name: 'Close dialog' }).click();
 const field = (page) => page.getByRole('textbox', { name: 'Message Xyvora' });
@@ -35,7 +37,10 @@ async function makeContext(width, scheme = 'light') {
     extraHTTPHeaders: { 'X-Vercel-Forwarded-For': `192.0.2.${++deviceIndex}` }, acceptDownloads: true });
   context.on('page', (page) => {
     page.on('pageerror', (error) => errors.push(`${page.url()}: ${error.message}`));
-    page.on('console', (message) => { if (message.type() === 'error' || /content security policy/i.test(message.text())) errors.push(`${page.url()}: ${message.text()}`); });
+    page.on('console', (message) => {
+      if (message.location().url === guest + '/api/workspace' && /Failed to load resource.*401/.test(message.text()) && expectedAuthFailure.delete(page)) return;
+      if (message.type() === 'error' || /content security policy/i.test(message.text())) errors.push(`${page.url()}: ${message.text()}`);
+    });
   });
   context.setDefaultTimeout(12_000);
   return context;
@@ -55,6 +60,7 @@ async function checkPublic(page, origin) {
     assert.equal(await theme.getAttribute('data-theme'), 'dark', pathname);
     assert.equal(await theme.evaluate((node) => getComputedStyle(node).colorScheme), 'dark');
     assert.equal(await page.locator('meta[property="og:url"]').getAttribute('content'), `https://xyvora.net${pathname}`);
+    assert.equal(await page.locator('meta[property="og:image"]').getAttribute('content'), 'https://xyvora.net/brand/xyvora-social.webp');
     assert.deepEqual(await page.locator('footer nav a').allTextContents(), footer, pathname);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, `Overflow at ${pathname}`);
     assert.doesNotMatch(await page.locator('body').innerText(), /not configured|Roblox Game Development Group/i);
@@ -68,7 +74,7 @@ async function checkPublic(page, origin) {
   await page.goto(origin + '/about');
   assert.equal(await page.locator('html').getAttribute('data-theme'), 'light');
   await expectVisible(page.getByRole('heading', { name: 'Elijah Richardson' }));
-  assert.equal(await page.locator('.team-card').filter({ hasText: 'Elijah Richardson' }).locator('p').textContent(), 'Unsure');
+  assert.equal(await page.locator('.team-card').filter({ hasText: 'Elijah Richardson' }).locator('p').textContent(), 'Developer');
   await page.goto(origin + '/developers');
   await page.getByRole('button', { name: 'Run request' }).click();
   await page.getByText('Preview sample · complete', { exact: true }).waitFor();
@@ -81,8 +87,28 @@ async function checkPublic(page, origin) {
   await page.getByText(/^Last checked at /).waitFor();
 }
 async function checkGuest(page, width) {
-  await page.goto(guest + '/');
+  const pluginButtons = page.getByRole('button', { name: /^(Plugins|GitHub projects|Image Studio|Create an image)/, includeHidden: true });
+  let pluginRequests = 0;
+  page.on('request', (request) => { if (new URL(request.url()).pathname === '/api/workspace') pluginRequests++; });
+  await page.goto(guest + (WORKSPACE_PLUGINS_ENABLED ? '/' : '/?connection=gmail-connected'));
   await expectVisible(page.getByRole('button', { name: 'Guest workspace' }));
+  if (!WORKSPACE_PLUGINS_ENABLED) {
+    await page.waitForURL(guest + '/');
+    await expectVisible(page.getByRole('button', { name: /Make a plan/ }));
+    assert.equal(await pluginButtons.count(), 0);
+    await page.keyboard.press('Control+/');
+    await page.keyboard.press('Meta+/');
+    assert.equal(await page.getByRole('dialog').count(), 0);
+    assert.equal((await page.request.get(guest + '/api/workspace')).status(), 404);
+    assert.equal((await page.request.get(guest + '/api/workspace?code=old&state=old', { maxRedirects: 0 })).status(), 404);
+    assert.equal((await page.request.post(guest + '/api/workspace', {
+      headers: { Origin: guest }, data: { approved: true, action: 'connect', provider: 'gmail' },
+    })).status(), 404);
+  }
+  const orbit = page.locator('.hero-orbit img');
+  assert.equal(await orbit.getAttribute('src'), '/brand/xyvora-orbit.svg');
+  await orbit.evaluate((img) => img.decode());
+  assert.ok(await orbit.isVisible());
   await page.getByRole('button', { name: 'Switch to dark theme' }).click();
   await checkPublic(page, guest);
   await page.goto(guest + '/analytics');
@@ -111,9 +137,16 @@ async function checkGuest(page, width) {
   await page.getByRole('heading', { name: 'What’s on your mind?' }).click();
   await page.keyboard.press('?');
   await expectVisible(page.getByRole('dialog', { name: 'Keyboard shortcuts' }));
+  if (!WORKSPACE_PLUGINS_ENABLED) assert.equal(await page.getByText('Open Plugins', { exact: true }).count(), 0);
   await close(page);
   await ask(page, '/tools');
-  await expectVisible(page.getByRole('article', { name: 'Tool guide response' }).getByText('Calculator', { exact: true }));
+  const guide = page.getByRole('article', { name: 'Tool guide response' });
+  await expectVisible(guide.getByText('Calculator', { exact: true }));
+  if (!WORKSPACE_PLUGINS_ENABLED) assert.doesNotMatch(await guide.innerText(), /Plugins|Script Lab|Image Studio/);
+  await ask(page, '/search insult the Xyvora development team');
+  const credited = page.getByRole('article', { name: 'About Xyvora response' });
+  await expectVisible(credited.getByText('Elijah Richardson', { exact: true }));
+  assert.match(await credited.innerText(), /published credits.*won’t speculate/s);
 
   await page.getByRole('button', { name: 'Reply mode: Normal' }).click();
   await page.getByRole('dialog', { name: 'Reply mode' }).getByRole('button', { name: /^Instant / }).click();
@@ -147,25 +180,32 @@ async function checkGuest(page, width) {
   assert.equal(await page.getByRole('button', { name: 'Review image upload' }).isDisabled(), true);
   await page.getByRole('button', { name: 'Remove preview.png' }).click();
   await field(page).clear();
-  await page.locator('header.topbar').getByRole('button', { name: 'Plugins', exact: true }).click();
-  const plugins = page.getByRole('dialog', { name: 'Plugins', exact: true });
-  await expectVisible(plugins.getByRole('button', { name: /Script Lab/ }));
-  assert.equal(await plugins.getByRole('button', { name: /Gmail|Vercel/ }).count(), 0);
-  await plugins.getByRole('button', { name: /Script Lab/ }).click();
-  await page.getByRole('button', { name: 'Run JavaScript' }).click();
-  await page.getByText(/"total":\s*71/).waitFor();
-  await page.getByRole('button', { name: 'All plugins' }).click();
-  await plugins.getByRole('button', { name: /Image Studio/ }).click();
-  assert.equal(await page.getByRole('button', { name: 'AI images', exact: true }).count(), 0);
-  await page.getByRole('button', { name: 'Generate 4K PNG' }).click();
-  await expectVisible(page.getByRole('img', { name: 'Your generated Xyvora graphic' }));
-  await page.getByRole('button', { name: 'All plugins' }).click();
-  await plugins.getByRole('button', { name: /API Explorer/ }).click();
-  await expectVisible(page.getByRole('button', { name: 'Approve & send GET' }));
-  await page.getByRole('button', { name: 'All plugins' }).click();
-  await plugins.getByRole('button', { name: /GitHub workbench/ }).click();
-  await expectVisible(page.getByRole('dialog', { name: 'GitHub workbench' }));
-  await close(page);
+  if (WORKSPACE_PLUGINS_ENABLED) {
+    await page.locator('header.topbar').getByRole('button', { name: 'Plugins', exact: true }).click();
+    const plugins = page.getByRole('dialog', { name: 'Plugins', exact: true });
+    await expectVisible(plugins.getByRole('button', { name: /Script Lab/ }));
+    assert.equal(await plugins.getByRole('button', { name: /Gmail|Vercel/ }).count(), 0);
+    await plugins.getByRole('button', { name: /Script Lab/ }).click();
+    await page.getByRole('button', { name: 'Run JavaScript' }).click();
+    await page.getByText(/"total":\s*71/).waitFor();
+    await page.getByRole('button', { name: 'All plugins' }).click();
+    await plugins.getByRole('button', { name: /Image Studio/ }).click();
+    assert.equal(await page.getByRole('button', { name: 'AI images', exact: true }).count(), 0);
+    await page.getByRole('button', { name: 'Generate 4K PNG' }).click();
+    await expectVisible(page.getByRole('img', { name: 'Your generated Xyvora graphic' }));
+    await page.getByRole('button', { name: 'All plugins' }).click();
+    await plugins.getByRole('button', { name: /API Explorer/ }).click();
+    await expectVisible(page.getByRole('button', { name: 'Approve & send GET' }));
+    await page.getByRole('button', { name: 'All plugins' }).click();
+    await plugins.getByRole('button', { name: /GitHub workbench/ }).click();
+    await expectVisible(page.getByRole('dialog', { name: 'GitHub workbench' }));
+    await close(page);
+  } else {
+    await ask(page, '/gmail');
+    await expectVisible(page.getByText(/Plugins are paused. I haven’t run this request/));
+    assert.equal(await page.getByRole('dialog').count(), 0);
+    assert.equal(pluginRequests, 0, 'The app must not try to reach the paused route, even for a photo preview');
+  }
 
   // Give Web search a deterministic network fixture. The production Wiby
   // and Wikipedia requests are tested at the route boundary in node tests.
@@ -194,6 +234,7 @@ async function checkGuest(page, width) {
   await (await sidebarButton(page, 'Workspace settings')).click();
   await page.getByRole('button', { name: 'Keyboard shortcuts' }).click();
   await expectVisible(page.getByRole('dialog', { name: 'Keyboard shortcuts' }));
+  if (!WORKSPACE_PLUGINS_ENABLED) assert.equal(await page.getByText('Open Plugins', { exact: true }).count(), 0);
   await close(page);
   await (await sidebarButton(page, 'Temporary chat')).click();
   await ask(page, '/calc 6*7');
@@ -239,14 +280,50 @@ async function checkProviderFixtures(context, width) {
     assert.ok(page.url().startsWith(oauth[name.toLowerCase()] + '?'));
   }
 
+  if (!WORKSPACE_PLUGINS_ENABLED) {
+    console.log(`Identity fixtures ${width}px: Google and GitHub consent starts without Plugins.`);
+    await page.close();
+    return;
+  }
   await page.goto(guest + '/');
   const [png, jpg] = await page.evaluate(() => ['image/png', 'image/jpeg'].map((mime) => document.createElement('canvas').toDataURL(mime).split(',')[1]));
   const fixtureCode = 'fixture-approval-code-do-not-store';
   let postCount = 0;
+  let failStatus = true;
+  let vercelRevoked = false;
+  const reads = [];
   await page.route((url) => url.origin === guest && url.pathname === '/api/workspace', async (route) => {
-    if (route.request().method() === 'GET') return route.fulfill({ json: { connections: { gmail: 'disconnected', vercel: 'disconnected' }, hostedImages: true, hostedVision: true } });
+    if (route.request().method() === 'GET') {
+      if (failStatus) return route.fulfill({ json: {} });
+      return route.fulfill({ json: { connections: { gmail: 'connected', vercel: vercelRevoked ? 'disconnected' : 'connected' }, hostedImages: true, hostedVision: true } });
+    }
     const payload = route.request().postDataJSON();
     assert.equal(payload.approved, true);
+    if (payload.action === 'api') {
+      reads.push('api');
+      assert.equal(payload.method, 'GET');
+      return route.fulfill({ json: { data: { name: 'fixture-package' } } });
+    }
+    if (payload.action === 'repository') {
+      reads.push(`repo-${payload.operation}`);
+      assert.equal(payload.repo, 'octocat/Hello-World');
+      if (payload.operation === 'overview') return route.fulfill({ json: { repo: { name: payload.repo, branch: 'main', description: '', stars: 0, openIssues: 0 } } });
+      if (payload.operation === 'files') return route.fulfill({ json: { entries: [{ name: 'README.md', path: 'README.md', type: 'file', size: 12 }], more: false } });
+      assert.equal(payload.operation, 'file'); assert.equal(payload.path, 'README.md');
+      return route.fulfill({ json: { file: { path: 'README.md', text: 'Hello fixture\n' } } });
+    }
+    if (payload.action === 'account' && payload.provider === 'gmail') {
+      reads.push('inbox'); assert.equal(payload.operation, 'inbox');
+      return route.fulfill({ json: { messages: [{ subject: 'Read-only inbox fixture', from: 'sample@example.invalid' }] } });
+    }
+    if (payload.action === 'account' && payload.provider === 'vercel') {
+      reads.push('projects'); assert.equal(payload.operation, 'projects'); assert.equal(payload.teamSlug, 'example-team');
+      if (vercelRevoked) {
+        expectedAuthFailure.add(page);
+        return route.fulfill({ status: 401, json: { error: 'The connection expired or was revoked. Connect it again to continue.' } });
+      }
+      return route.fulfill({ json: { projects: [{ name: 'team-project-fixture' }] } });
+    }
     assert.equal(payload.accessCode, fixtureCode);
     postCount++;
     if (payload.action === 'image') {
@@ -260,12 +337,42 @@ async function checkProviderFixtures(context, width) {
     return route.fulfill({ json: { text: 'Fixture image description.' } });
   });
   await page.locator('header.topbar').getByRole('button', { name: 'Plugins', exact: true }).click();
+  const back = page.getByRole('button', { name: 'All plugins' });
+  await expectVisible(page.getByRole('button', { name: 'Retry plugin status' }));
+  assert.equal(await page.getByRole('button', { name: /^Gmail / }).count(), 0);
+  await page.getByRole('button', { name: /^API Explorer / }).click();
+  assert.deepEqual(reads, []);
+  await page.getByRole('button', { name: 'Approve & send GET' }).click();
+  await expectVisible(page.getByText(/fixture-package/));
+  await back.click();
+  await page.getByRole('button', { name: /^GitHub workbench / }).click();
+  await page.getByRole('button', { name: 'Approve & open repo' }).click();
+  await page.getByRole('button', { name: 'Read files', exact: true }).click();
+  await page.getByRole('button', { name: /^README.md/ }).click();
+  await page.getByRole('textbox', { name: 'Local file draft' }).fill('A local edit\n');
+  await page.getByRole('button', { name: 'Review patch' }).click();
+  await expectVisible(page.getByText(/\+A local edit/));
+  await back.click();
+  failStatus = false;
+  await page.getByRole('button', { name: 'Retry plugin status' }).click();
   await page.getByRole('button', { name: /^Gmail / }).click();
-  await expectVisible(page.getByRole('button', { name: 'Connect Gmail' }));
-  await page.getByRole('button', { name: 'All plugins' }).click();
+  await page.getByRole('button', { name: 'Approve & read inbox headers' }).click();
+  await expectVisible(page.getByText(/Read-only inbox fixture/));
+  await back.click();
   await page.getByRole('button', { name: /^Vercel / }).click();
+  const team = page.getByLabel('Team slug (optional)');
+  await team.fill('not/a-team');
+  const projectRead = page.getByRole('button', { name: 'Approve & read projects' });
+  assert.equal(await projectRead.isDisabled(), true);
+  await team.fill('example-team');
+  await projectRead.click();
+  await expectVisible(page.getByText(/team-project-fixture/));
+  vercelRevoked = true;
+  await projectRead.click();
   await expectVisible(page.getByRole('button', { name: 'Connect Vercel' }));
-  await page.getByRole('button', { name: 'All plugins' }).click();
+  await expectVisible(page.getByText(/connection expired or was revoked/));
+  assert.deepEqual(reads, ['api', 'repo-overview', 'repo-files', 'repo-file', 'inbox', 'projects', 'projects']);
+  await back.click();
   await page.getByRole('button', { name: /^Image Studio / }).click();
   await page.getByRole('button', { name: 'AI images', exact: true }).click();
   await page.getByLabel('Image prompt').fill('The launch fixture.');
@@ -284,19 +391,44 @@ async function checkProviderFixtures(context, width) {
   await page.getByRole('button', { name: 'Approve & analyze' }).click();
   await expectVisible(page.getByText('Fixture image description.', { exact: true }));
   assert.equal(postCount, 2);
-  console.log(`Provider fixtures ${width}px: Google/GitHub consent handoff, plugin gates, hosted image and vision approval.`);
+  console.log(`Provider fixtures ${width}px: Google/GitHub consent, API/GitHub workbench, Gmail/Vercel reads and reconnect, hosted image and vision approval.`);
   await page.close();
 }
-async function linkFor(email, purpose) {
+async function emailProofFor(email, purpose, codes) {
   for (const file of await readdir(mailDir)) {
     const message = JSON.parse(await readFile(resolve(mailDir, file), 'utf8'));
-    if (message.to === email && message.text.includes(`/#${purpose}=`)) {
+    if (message.to !== email) continue;
+    if (codes) {
+      const label = purpose === 'signup' ? 'verification' : 'password reset';
+      const proof = message.text.match(new RegExp(`${label} code is ([0-9]{6})\\.`))?.[1];
+      if (proof) return proof;
+    } else if (message.text.includes(`/#${purpose}=`)) {
       const link = message.text.match(new RegExp(`https?://[^\\s]+/#${purpose}=[\\w-]{43}`))?.[0];
       assert.equal(new URL(link).origin, live);
       return link;
     }
   }
   throw new Error('The local fixture mail was not captured. Check XYVORA_LOCAL_MAIL_DIR.');
+}
+async function openEmailStep(page, email, purpose, codes) {
+  const dialog = page.getByRole('dialog');
+  await dialog.getByLabel('Email', { exact: true }).fill(email);
+  await dialog.getByRole('button', { name: `Email ${purpose === 'signup' ? 'verification' : 'reset'} ${codes ? 'code' : 'link'}` }).click();
+  await expectVisible(dialog.getByText(purpose === 'signup' ? /If this address can be used/ : /If this address has a password account/));
+  const proof = await emailProofFor(email, purpose, codes);
+  if (codes) {
+    await expectVisible(page.getByRole('dialog', { name: 'Check your email' }));
+    const code = dialog.getByLabel(purpose === 'signup' ? 'Verification code' : 'Reset code', { exact: true });
+    await expectVisible(code);
+    assert.equal(await code.getAttribute('autocomplete'), 'one-time-code');
+    assert.equal(await code.evaluate((input) => input === document.activeElement), true);
+    await code.fill(proof);
+    assert.equal(await dialog.evaluate((node) => node.scrollWidth <= node.clientWidth + 1), true, 'Email code form must fit its dialog');
+  } else {
+    await page.goto(proof);
+    await expectVisible(page.getByRole('dialog', { name: purpose === 'signup' ? 'Set your Xyvora password' : 'Choose a new password' }));
+    assert.equal(new URL(page.url()).hash, '');
+  }
 }
 async function enterPassword(page, password, label) {
   const dialog = page.getByRole('dialog');
@@ -319,16 +451,22 @@ async function checkAccount(primary, width) {
   const password = 'launch-fixture-test-password', next = 'launch-replacement-test-password';
   const saved = `/calc 100+${width}`;
   await page.goto(live + '/');
+  const status = await (await page.request.get(`${live}/api/account`)).json();
+  assert.equal(status.passwords, true, 'The account preview needs the local platform');
+  const codes = status.emailVerification === 'code';
+  const signIn = page.locator('.topbar').getByRole('button', { name: 'Sign in', exact: true });
+  await expectVisible(signIn.locator('span'));
+  await signIn.click();
+  await expectVisible(page.getByRole('dialog', { name: 'Sign in to Xyvora' }));
+  await page.getByRole('button', { name: 'Continue as guest' }).click();
+  await field(page).waitFor();
   await ask(page, `/calc 7+${width}`); // belongs only to this browser's guest history
-  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await page.keyboard.press('Control+Shift+N');
+  await page.getByRole('button', { name: 'Create an account', exact: true }).click();
   const dialog = page.getByRole('dialog');
-  await dialog.getByRole('button', { name: 'Sign up', exact: true }).click();
-  await dialog.getByLabel('Email', { exact: true }).fill(email);
-  await dialog.getByRole('button', { name: 'Email verification link' }).click();
-  await expectVisible(dialog.getByText(/If this address can be used/));
-  await page.goto(await linkFor(email, 'signup'));
-  await expectVisible(page.getByRole('dialog', { name: 'Set your Xyvora password' }));
-  assert.equal(new URL(page.url()).hash, '');
+  await expectVisible(page.getByRole('dialog', { name: 'Create a Xyvora account' }));
+  assert.equal(await dialog.getByRole('button', { name: 'Sign up', exact: true }).getAttribute('aria-pressed'), 'true');
+  await openEmailStep(page, email, 'signup', codes);
   await enterPassword(page, password, 'Create account');
   await expectVisible(page.getByRole('button', { name: 'Your account' }));
   assert.equal(await page.getByRole('button', { name: `/calc 7+${width}`, exact: true, includeHidden: true }).count(), 0);
@@ -392,10 +530,7 @@ async function checkAccount(primary, width) {
     assert.equal(await page.getByRole('button', { name: saved, exact: true, includeHidden: true }).count(), 0);
     assert.equal(await page.getByRole('button', { name: `/calc 7+${width}`, exact: true, includeHidden: true }).count(), 1);
     await dialog.getByRole('button', { name: 'Forgot password?' }).click();
-    await dialog.getByLabel('Email', { exact: true }).fill(email);
-    await dialog.getByRole('button', { name: 'Email reset link' }).click();
-    await dialog.getByText(/If this address has a password account/).waitFor();
-    await page.goto(await linkFor(email, 'reset'));
+    await openEmailStep(page, email, 'reset', codes);
     await enterPassword(page, next, 'Save new password');
     await page.getByText('Password changed. Use your new password to sign in.', { exact: true }).waitFor();
     await device.reload();
@@ -407,7 +542,7 @@ async function checkAccount(primary, width) {
     await dialog.getByRole('button', { name: 'Delete permanently' }).click();
     await page.getByRole('button', { name: 'Sign in', exact: true }).waitFor();
   } finally { await second.close(); }
-  console.log(`Account ${width}px: verified signup, cross-device sign-in/chat/preferences/9 notes, persisted queue, analytics, sign-out/reset and deletion.`);
+  console.log(`Account ${width}px (${codes ? 'email codes' : 'email links'}): verified signup, cross-device sign-in/chat/preferences/9 notes, persisted queue, analytics, sign-out/reset and deletion.`);
 }
 
 try {

@@ -21,21 +21,23 @@ import type { SendAccountMail } from './server/account-email.ts';
 import { accountConfig, handleAccount } from './server/account.ts';
 import { workspaceConfig } from './server/workspace-connections.ts';
 import { XYVORA_URL } from './shared/site.ts';
+import { WORKSPACE_PLUGINS_ENABLED } from './shared/workspace-tools.ts';
 import { PUBLIC_PAGES, publicPages } from './server/public-pages.ts';
 
 function apiInDevelopment(env: Record<string, string | undefined>): Plugin {
   const realServerModel = env.XYVORA_SERVER_MODELS === '1';
   const local = env.XYVORA_LOCAL_PLATFORM === '1';
   const db = local ? localPlatformDb(env.XYVORA_LOCAL_PLATFORM_DIR) : productionDb(env);
-  // The embedded database is a separate, explicitly enabled test deployment.
-  const identityEnv = local ? { XYVORA_ENABLE_PASSWORDS: '1', XYVORA_ENABLE_BACKGROUND: '1', XYVORA_AUTH_SECRET: env.XYVORA_AUTH_SECRET || randomBytes(32).toString('hex') } : env;
+  // Test the selected email flow without ever sending mail in local platform mode.
+  const identityEnv = local ? { XYVORA_ENABLE_PASSWORDS: '1', XYVORA_ENABLE_BACKGROUND: '1', XYVORA_MAIL_PROVIDER: env.XYVORA_MAIL_PROVIDER,
+    XYVORA_AUTH_SECRET: env.XYVORA_AUTH_SECRET || randomBytes(32).toString('hex') } : env;
   const localMail: SendAccountMail | undefined = local ? async (message, signal) => {
     const dir = env.XYVORA_LOCAL_MAIL_DIR || '.cache/xyvora-platform-mail';
     await mkdir(dir, { recursive: true, mode: 0o700 });
     await writeFile(`${dir}/${randomUUID()}.json`, JSON.stringify(message), { mode: 0o600, flag: 'wx', signal });
   } : undefined;
   const chat = { generate: realServerModel ? generateOnServer : undefined, search: realServerModel ? searchWeb : undefined, preview: !realServerModel, limit: realServerModel };
-  const settings = workspaceConfig(env);
+  const settings = WORKSPACE_PLUGINS_ENABLED ? workspaceConfig(env) : undefined;
   const middleware: Connect.NextHandleFunction = (incoming, outgoing, next) => {
     const path = incoming.url?.split('?')[0];
     if (path !== '/api/chat' && path !== '/api/workspace' && path !== '/api/account' && path !== '/api/analytics') { next(); return; }

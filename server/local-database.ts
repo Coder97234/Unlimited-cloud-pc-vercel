@@ -11,7 +11,7 @@ export function localPlatformDb(directory = '.cache/xyvora-platform'): PlatformD
       const path = resolve(directory);
       await mkdir(path, { recursive: true });
       const db = new PGlite(path);
-      for (const file of ['001_platform.sql', '002_launch.sql']) await db.exec(await readFile(`database/${file}`, 'utf8'));
+      for (const file of ['001_platform.sql', '002_launch.sql', '003_server_access.sql']) await db.exec(await readFile(`database/${file}`, 'utf8'));
       return db;
     })();
     return (await (await database).query(sql, params)).rows as never[];

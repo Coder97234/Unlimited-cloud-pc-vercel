@@ -15,7 +15,12 @@ export function productionDb(env: Record<string, string | undefined>): PlatformD
     if (!/^postgres(?:ql)?:\/\//i.test(url)) throw new Error('Use a PostgreSQL URL for XYVORA_DATABASE_URL.');
     // Chat and unconfigured deployments do not initialize a driver or pool.
     pending ??= import('pg').then(({ default: driver }) => {
-      const pool = new driver.Pool({ connectionString: url, max: 3, idleTimeoutMillis: 8_000, connectionTimeoutMillis: 3_000, statement_timeout: 5_000, query_timeout: 6_000, allowExitOnIdle: true });
+      const sharedPooler = new URL(url).hostname.endsWith('.pooler.supabase.com');
+      // Supavisor multiplexes sessions; the scoped role sets statement_timeout
+      // in 003_server_access.sql instead of sending an unsupported startup GUC.
+      const pool = new driver.Pool({ connectionString: url, max: sharedPooler ? 1 : 3,
+        idleTimeoutMillis: 8_000, connectionTimeoutMillis: 3_000, ...(sharedPooler ? {} : { statement_timeout: 5_000 }),
+        query_timeout: 6_000, allowExitOnIdle: true });
       pool.on('error', () => console.error('[xyvora] The platform database connection closed.'));
       return pool;
     });

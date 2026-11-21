@@ -24,7 +24,7 @@
       </section>
       <section class="info-section info-card" aria-labelledby="account-title">
         <h2 id="account-title">Accounts, memory, and tasks</h2>
-        <p>If enabled and you sign in, Xyvora stores the provider and stable identity, account name, verified email when provided, and a session record. For password accounts, Xyvora stores the verified email and a salted password hash. The email delivery service processes the address and a time-limited verification or recovery email. The database stores only a digest of each link token. Session cookies contain a random token, not provider credentials.</p>
+        <p>If enabled and you sign in, Xyvora stores the provider and stable identity, account name, verified email when provided, and a session record. For password accounts, Xyvora stores the verified email and a salted password hash. The configured email delivery service (Bird or Resend) processes the address and a time-limited verification or recovery email. Xyvora’s database stores a digest of the link token or code, not the raw value. Session cookies contain a random token, not provider credentials.</p>
         <p>Accounts sync chat history, settings, and the notes you choose to save. Pause, edit, or remove notes under Memory. When available, background tasks store the prompt, result, status, and timestamps under that account. Results are available in the app for up to 30 days; remove tasks sooner from Background tasks. Expired database records are cleaned up periodically.</p>
         <p>Sign out to end this browser’s session. Use Your account → Delete account to remove the account, sessions, saved chats, settings, synced memory, and background tasks from Xyvora’s active database. This does not remove files you downloaded, guest browser data, or an old local copy. Hosting backups and operational logs may be retained separately.</p>
       </section>
@@ -32,12 +32,10 @@
         <h2 id="providers-title">Optional providers</h2>
         <ul class="info-list">
           <li>Web search sends your query to Wiby and Wikipedia. Do not include private data in the query.</li>
-          <li>GitHub’s public API receives the repository, branch, or file read request you approve. The API Explorer can also send approved package lookups to npm. Neither tool can write to those services. A file excerpt is sent for chat only if you attach and send it.</li>
-          <li>Identity sign-in exchanges information with the provider you choose: Google, GitHub, or Discord where configured. Signing in does not connect any plugin.</li>
-          <li>Gmail and Vercel plugins require separate permission. Approved reads use a short-lived connection. Plugin account results aren’t automatically added to chat.</li>
-          <li>Hosted Image Studio and image analysis send the approved prompt or prepared image and question to OpenAI, not your entire chat or saved memory. Saved photo turns store the filename and conversation, not the image bytes. The local 4K graphics generator does not upload a prompt.</li>
+          <li>Identity sign-in exchanges information with the provider you choose: Google, GitHub, or Discord where configured. It does not grant access to external accounts beyond sign-in.</li>
+          <li>Workspace plugins and hosted image tools are paused. Image previews stay on your device. Older saved photo turns can contain the filename and conversation, not the image bytes.</li>
         </ul>
-        <p>External services have their own privacy notices. Disconnect permissions you no longer need in Plugins or at the provider.</p>
+        <p>External services have their own privacy notices. If you previously granted access to an external account, you can revoke that grant in the provider’s own account settings.</p>
       </section>
       <section class="info-section info-card" aria-labelledby="measurement-title">
         <h2 id="measurement-title">Optional measurement</h2>
@@ -46,7 +44,7 @@
       </section>
       <section class="info-section info-card" aria-labelledby="choices-title">
         <h2 id="choices-title">Your choices</h2>
-        <p>Clear saved conversations in Workspace settings or export an open chat with its download button. Revoke external access in Plugins or at the provider. If you use a shared device, clear this site’s history and sign out when done. For supervised classroom use, read <a href="/schools">For schools</a> and don’t submit student records.</p>
+        <p>Clear saved conversations in Workspace settings or export an open chat with its download button. If you use a shared device, clear this site’s history and sign out when done. For supervised classroom use, read <a href="/schools">For schools</a> and don’t submit student records.</p>
         <p>For general questions, use the <a href="https://github.com/Coder97234/Unlimited-cloud-pc-vercel/issues">public project issue tracker</a>. Don’t post private account details, student information, or other personal data there.</p>
       </section>
     </main>

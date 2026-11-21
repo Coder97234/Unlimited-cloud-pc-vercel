@@ -1,3 +1,4 @@
+import { mentionsCreator } from './creator-policy.ts';
 import { workspaceIntent } from './workspace-tools.ts';
 import { directInfoSkill, readSkillCommand } from './skill-catalog.ts';
 
@@ -11,10 +12,11 @@ export function explicitSearchQuery(prompt: string): string | undefined {
 }
 
 export function allowsSearchToggle(prompt: string) {
-  return !readSkillCommand(prompt) && !directInfoSkill(prompt) && !workspaceIntent(prompt);
+  return !readSkillCommand(prompt) && !directInfoSkill(prompt) && !workspaceIntent(prompt) && !mentionsCreator(prompt);
 }
 
 export function chatSearchQuery(prompt: string, searchEnabled: boolean) {
+  if (mentionsCreator(prompt)) return;
   return explicitSearchQuery(prompt) ?? (searchEnabled && allowsSearchToggle(prompt) ? prompt.trim() : undefined);
 }
 

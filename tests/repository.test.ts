@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createTwoFilesPatch, applyPatch } from 'diff';
-import { handleWorkspace } from '../server/workspace.ts';
+import { handleWorkspaceTools } from '../server/workspace.ts';
 import { repositoryName, repositoryPath } from '../shared/repositories.ts';
 import { publicApiTarget, workspaceIntent } from '../shared/workspace-tools.ts';
 import { platformPost } from './platform-fixture.ts';
 
 const path = '/api/workspace';
-const post = (body: object, headers = {}) => handleWorkspace(platformPost(path, body, headers), undefined, { limit: false });
+const post = (body: object, headers = {}) => handleWorkspaceTools(platformPost(path, body, headers), undefined, { limit: false });
 
 test('GitHub workbench reads only bounded public GitHub resources after approval', async (t) => {
   const endpoint = 'https://api.github.com/repos/octocat/Hello-World';

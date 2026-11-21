@@ -11,7 +11,7 @@ import type { LocalFile } from '../lib/files.ts';
 import type { VisionPhoto } from '../lib/vision-file.ts';
 import { usePhotoUrl } from './VisionDialog.tsx';
 import { MODE_ICONS } from './ModeDialog.tsx';
-import { hopMascot, typedCompletedWord } from '../lib/mascot-motion.ts';
+import { floatMascot, typedCompletedWord } from '../lib/mascot-motion.ts';
 import { Mascot } from './Brand.tsx';
 
 type Props = {
@@ -107,14 +107,14 @@ export function Composer({ draft, onDraft, textarea, files, photo, canAnalyze, o
           const field = event.currentTarget;
           const input = event.nativeEvent as InputEvent;
           if (beforeComposition.current === null && !input.isComposing && !input.inputType?.startsWith('delete')
-            && typedCompletedWord(draft, field.value, field.selectionStart)) hopMascot(mascot.current);
+            && typedCompletedWord(draft, field.value, field.selectionStart)) floatMascot(mascot.current);
           onDraft(field.value);
         }}
         onCompositionStart={() => { beforeComposition.current = draft; }}
         onCompositionEnd={({ currentTarget: field }) => {
           const before = beforeComposition.current;
           beforeComposition.current = null;
-          if (before !== null && typedCompletedWord(before, field.value, field.selectionStart, true)) hopMascot(mascot.current);
+          if (before !== null && typedCompletedWord(before, field.value, field.selectionStart, true)) floatMascot(mascot.current);
         }}
         onKeyDown={(event) => {
           if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
@@ -133,7 +133,7 @@ export function Composer({ draft, onDraft, textarea, files, photo, canAnalyze, o
           <button type="button" className="mode-chip" title={MODES[mode].description} aria-label={`Reply mode: ${MODES[mode].name}`} aria-haspopup="dialog" onClick={onMode} disabled={busy}>
             <ModeIcon size={15} /><span>{MODES[mode].name}</span><ChevronDown size={13} />
           </button>
-          <button type="button" className="web-search-chip" aria-pressed={explicit || (searchEnabled && webSearch)} disabled={!canSearch || busy || !searchEnabled || explicit}
+          <button type="button" className="web-search-chip" aria-label="Web search" aria-pressed={explicit || (searchEnabled && webSearch)} disabled={!canSearch || busy || !searchEnabled || explicit}
             title={!canSearch ? 'Available on the live site' : explicit ? 'Search command active' : searchEnabled ? 'Search the web with just this prompt' : 'This prompt uses a different tool'} onClick={onToggleSearch}>
             <Globe size={16} /><span>Web search</span>
           </button>

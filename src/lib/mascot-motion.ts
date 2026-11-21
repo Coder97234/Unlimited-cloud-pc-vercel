@@ -26,25 +26,17 @@ export function typedCompletedWord(before: string, after: string, caret = after.
   return from < caret && hasCompletedWord(after.slice(0, caret), from, committed);
 }
 
-const hops = new WeakMap<HTMLSpanElement, Animation>();
+const flights = new WeakMap<HTMLSpanElement, Animation>();
 let reducedMotion: MediaQueryList | undefined;
 
-export function hopMascot(art: HTMLSpanElement | null) {
+export function floatMascot(art: HTMLSpanElement | null) {
   if (!art?.animate || (reducedMotion ??= window.matchMedia('(prefers-reduced-motion: reduce)')).matches) return;
-  const inFlight = hops.get(art);
-  // Fast replies (and pastes) share one hop. Never queue an animation behind
-  // the stream or re-render the transcript just to move the mascot.
+  const inFlight = flights.get(art);
+  // Fast replies share one brief float. Never queue motion behind the stream.
   if (inFlight?.pending || inFlight?.playState === 'running') return;
-  hops.set(art, art.animate([
-    { transform: 'none', offset: 0, easing: 'ease-in' },
-    { transform: 'translateY(3%) scale(1.08, .93)', offset: .16, easing: 'cubic-bezier(.18,.66,.44,1)' },
-    { transform: 'translateY(-26%) rotate(-5deg) scale(.99, 1.05)', offset: .48, easing: 'cubic-bezier(.52,0,.84,.46)' },
-    { transform: 'translateY(3%) scale(1.06, .94)', offset: .84, easing: 'ease-out' },
+  flights.set(art, art.animate([
+    { transform: 'none', offset: 0, easing: 'cubic-bezier(.16,.8,.3,1)' },
+    { transform: 'translateY(-13%) rotate(-7deg) scale(1.03)', offset: .45, easing: 'ease-in-out' },
     { transform: 'none', offset: 1 },
-  ], { id: 'xyvora-word-hop', duration: 290 }));
-  art.animate([
-    { backgroundPosition: '0% 0%', offset: 0, easing: 'steps(1, end)' },
-    { backgroundPosition: '100% 0%', offset: .16, easing: 'steps(1, end)' },
-    { backgroundPosition: '0% 0%', offset: .53 },
-  ], { id: 'xyvora-word-blink', duration: 290 });
+  ], { id: 'xyvora-orbit-float', duration: 290 }));
 }

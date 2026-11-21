@@ -1,5 +1,6 @@
-import { createHash, createHmac, randomBytes, randomUUID, scrypt, timingSafeEqual } from 'node:crypto';
-import type { PublicAccount } from '../shared/account.ts';
+import { createHash, createHmac, randomBytes, randomInt, randomUUID, scrypt, timingSafeEqual } from 'node:crypto';
+import { EMAIL_CODE_LENGTH, EMAIL_CODE_MINUTES, EMAIL_RESEND_SECONDS } from '../shared/account.ts';
+import type { EmailPurpose, PublicAccount } from '../shared/account.ts';
 import { wellFormedText } from '../shared/stored-text.ts';
 import type { PlatformDb } from './database.ts';
 import { providerJson, ToolError } from './workspace-http.ts';
@@ -11,7 +12,7 @@ export const hashToken = (value: string) => createHash('sha256').update(value).d
 export const tokenPattern = /^[A-Za-z0-9_-]{43}$/;
 export const newToken = () => randomBytes(32).toString('base64url');
 
-function emailAddress(input: unknown) {
+export function emailAddress(input: unknown) {
   if (typeof input !== 'string' || input.length > 254) return;
   const email = input.trim().toLowerCase();
   const [name, domain] = email.split('@');
@@ -20,7 +21,32 @@ function emailAddress(input: unknown) {
   return email;
 }
 
-export function accountMailer(env: Record<string, string | undefined>): SendAccountMail | undefined {
+type Env = Record<string, string | undefined>;
+
+export function birdMailboxMailer(env: Env): SendAccountMail | undefined {
+  const key = env.XYVORA_BIRD_API_KEY?.trim() || env.BirDApi_Email?.trim();
+  const mailbox = env.XYVORA_BIRD_MAILBOX_ID?.trim();
+  if (!key || !/^bk_[a-z0-9_-]{8,512}$/i.test(key) || /^bk_(?:(?:us1|eu1)_)?x+$/i.test(key)
+    || !mailbox || !/^mbx_[a-z0-9]{1,64}$/i.test(mailbox)) return;
+  // Only Bird's regional hosts can receive this key. The mailbox ID is configured on the server.
+  const host = key.startsWith('bk_eu1_') ? 'eu1.platform.bird.com' : 'us1.platform.bird.com';
+  return async ({ to, subject, text }, signal) => {
+    const response = await fetch(`https://${host}/v1/email/mailboxes/${mailbox}/messages`, {
+      method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to: [to], subject, text, category: 'transactional' }),
+      redirect: 'error', cache: 'no-store', signal: AbortSignal.any([signal, AbortSignal.timeout(7_000)]),
+    }).catch(() => { throw new ToolError('Could not reach the Bird mailbox.', 502); });
+    // A successful response is an acknowledgement, not proof of inbox delivery.
+    // The provider's response may echo the message; never expose or log it.
+    await response.body?.cancel().catch(() => undefined);
+    if (response.status !== 202) throw new ToolError(`Bird did not accept the email (HTTP ${response.status}).`, 502);
+  };
+}
+
+export function accountMailer(env: Env): SendAccountMail | undefined {
+  const provider = env.XYVORA_MAIL_PROVIDER?.trim();
+  if (provider === 'bird') return birdMailboxMailer(env);
+  if (provider && provider !== 'resend') return;
   const key = env.XYVORA_MAIL_API_KEY?.trim();
   const from = emailAddress(env.XYVORA_MAIL_FROM);
   if (!key || !from) return;
@@ -68,38 +94,70 @@ export async function passwordLogin(db: PlatformDb, secret: string, input: Recor
   return { id: row.id, name: row.name, email: row.email, credential_version: row.credential_version };
 }
 
-export type LinkPurpose = 'signup' | 'reset';
-export async function sendEmailLink(db: PlatformDb, origin: string, send: SendAccountMail, secret: string, request: Request, purpose: LinkPurpose, raw: unknown, limit: boolean, schedule?: (work: Promise<void>) => void) {
+type EmailAuth = { db: PlatformDb; authSecret: string; emailVerification: 'link' | 'code' };
+const codeWindow = EMAIL_CODE_MINUTES * 60_000;
+const codePattern = new RegExp(`^[0-9]{${EMAIL_CODE_LENGTH}}$`);
+const sourceIp = (request: Request) => request.headers.get('x-vercel-forwarded-for')?.split(',')[0]?.trim().slice(0, 64) || 'local';
+// A short code must not be guessable offline from its database digest. Bind it
+// to the same normalized address and purpose on issuance and redemption.
+const codeDigest = (secret: string, purpose: EmailPurpose, email: string, code: string) =>
+  createHmac('sha256', secret).update(`email-code\0${purpose}\0${email}\0${code}`).digest('hex');
+
+export async function sendEmailChallenge({ db, origin, authSecret, emailVerification }: EmailAuth & { origin: string }, send: SendAccountMail, request: Request,
+  purpose: EmailPurpose, raw: unknown, { limit, schedule }: { limit: boolean; schedule?: (work: Promise<void>) => void }) {
   const email = emailAddress(raw);
   if (!email) throw new ToolError('Enter a valid email address.');
-  const ip = request.headers.get('x-vercel-forwarded-for')?.split(',')[0]?.trim().slice(0, 64) || 'local';
-  if (limit && !await authBudget(db, secret, 'email-ip', ip, 12, 60 * 60_000)) throw new ToolError('Too many email requests. Try again later.', 429);
+  if (limit && !await authBudget(db, authSecret, 'email-ip', sourceIp(request), 12, 60 * 60_000)) throw new ToolError('Too many email requests. Try again later.', 429);
   // Don't reveal if a password account exists or if this mailbox is throttled.
-  if (limit && !await authBudget(db, secret, `email-target-${purpose}`, email, 1, 90_000)) return;
-  const token = newToken(), digest = hashToken(token);
+  if (limit && !await authBudget(db, authSecret, `email-target-${purpose}`, email, 1, EMAIL_RESEND_SECONDS * 1_000)) return;
+  const byCode = emailVerification === 'code';
+  const proof = byCode ? String(randomInt(10 ** EMAIL_CODE_LENGTH)).padStart(EMAIL_CODE_LENGTH, '0') : newToken();
+  const digest = byCode ? codeDigest(authSecret, purpose, email, proof) : hashToken(proof);
+  // Reuse the existing link table and its expiry/cleanup. A new request
+  // replaces the previous challenge for this address and purpose.
   const [row] = await db.query(`insert into xyvora_email_links (digest,purpose,email,expires_ms)
     select $1,$2,$3,$4 where (exists (select 1 from xyvora_accounts where provider='password' and subject=$3)) = ($2='reset')
-    on conflict (purpose,email) do update set digest=excluded.digest, expires_ms=excluded.expires_ms returning digest`, [digest, purpose, email, Date.now() + 30 * 60_000]);
+    on conflict (purpose,email) do update set digest=excluded.digest, expires_ms=excluded.expires_ms returning digest`,
+  [digest, purpose, email, Date.now() + (byCode ? codeWindow : 30 * 60_000)]);
   if (!row) return;
-  const url = `${origin}/#${purpose}=${token}`;
+  const signup = purpose === 'signup';
+  const subject = byCode ? `Your Xyvora AI ${signup ? 'verification' : 'password reset'} code`
+    : signup ? 'Finish creating your Xyvora AI account' : 'Reset your Xyvora AI password';
+  const text = byCode
+    ? `Your Xyvora AI ${signup ? 'verification' : 'password reset'} code is ${proof}.\n\nEnter it at ${origin}. It expires in ${EMAIL_CODE_MINUTES} minutes and works once. If you didn’t request it, you can ignore this message.`
+    : `Open this link to ${signup ? 'verify your email and choose a password' : 'choose a new password'}:\n\n${origin}/#${purpose}=${proof}\n\nThis link expires in 30 minutes and works once. If you didn’t request it, you can ignore this message.`;
   const deliver = async () => {
     try {
-      // Decouple mail delivery from the returned timing on Vercel. Never use
-      // a recipient-provided URL or include the link in the response/logs.
-      await send({ to: email, subject: purpose === 'signup' ? 'Finish creating your Xyvora AI account' : 'Reset your Xyvora AI password',
-        text: `Open this link to ${purpose === 'signup' ? 'verify your email and choose a password' : 'choose a new password'}:\n\n${url}\n\nThis link expires in 30 minutes and works once. If you didn’t request it, you can ignore this message.` }, AbortSignal.timeout(9_000));
+      // Decouple Vercel response timing from delivery. Never expose the proof
+      // or provider response to the requester or in logs.
+      await send({ to: email, subject, text }, AbortSignal.timeout(9_000));
     } catch { console.warn('[xyvora] Account email delivery could not be confirmed.'); }
   };
   if (schedule) schedule(deliver());
   else await deliver();
 }
-export async function redeemEmailLink(db: PlatformDb, purpose: LinkPurpose, input: Record<string, unknown>) {
-  const { token, password } = input;
-  const invalid = () => new ToolError('This email link is invalid or expired. Request a new one.', 400);
-  if (typeof token !== 'string' || !tokenPattern.test(token)) throw invalid();
+
+export async function redeemEmailChallenge({ db, authSecret, emailVerification }: EmailAuth, request: Request, purpose: EmailPurpose, input: Record<string, unknown>, limit: boolean) {
+  const { token, code, password } = input;
+  const byCode = emailVerification === 'code' && token === undefined;
+  const invalid = () => new ToolError(byCode ? 'This code is incorrect or expired. Request a new one if it expired.' : 'This email link is invalid or expired. Request a new one.');
   if (!validPassword(password)) throw new ToolError('Use a password between 12 and 128 characters.');
-  const digest = hashToken(token);
-  // Avoid expensive password hashing for requests without a valid email link.
+  let digest: string;
+  if (byCode) {
+    const email = emailAddress(input.email);
+    if (!email || typeof code !== 'string' || !codePattern.test(code)) throw invalid();
+    // Budgets persist across invocations and stay in place even after a resend.
+    if (limit && (!await authBudget(db, authSecret, 'email-code-ip', sourceIp(request), 30, codeWindow)
+      || !await authBudget(db, authSecret, `email-code-target-${purpose}`, email, 5, codeWindow))) {
+      throw new ToolError(`Too many code attempts. Wait ${EMAIL_CODE_MINUTES} minutes and request a new code.`, 429);
+    }
+    digest = codeDigest(authSecret, purpose, email, code);
+  } else {
+    // A valid outstanding link can still be redeemed after switching to Bird.
+    if (code !== undefined || typeof token !== 'string' || !tokenPattern.test(token)) throw invalid();
+    digest = hashToken(token);
+  }
+  // Avoid expensive password hashing for requests without a valid proof.
   if (!(await db.query('select 1 from xyvora_email_links where digest=$1 and purpose=$2 and expires_ms>$3', [digest, purpose, Date.now()])).length) throw invalid();
   const salt = randomBytes(18).toString('hex');
   const key = await passwordDigest(password, salt);

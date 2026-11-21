@@ -8,7 +8,7 @@ import { Mascot } from './Brand.tsx';
 
 export function Sidebar({ threads, activeId, availability, temporary, memoryOn, signedIn, syncLabel, onMemory, onNew, onTemporary, onSearch, onPlugins, onRepo, onTasks, onWebSearch, onImage, onSettings, onCollapse, onThread, onDelete, onAbout }: {
   threads: Thread[]; activeId: string | null; availability: Availability | 'loading';
-  temporary: boolean; memoryOn: boolean; signedIn: boolean; syncLabel: string; onMemory: () => void; onNew: () => void; onTemporary: () => void; onSearch: () => void; onPlugins: () => void; onRepo: () => void; onTasks?: () => void; onWebSearch: () => void; onImage: () => void;
+  temporary: boolean; memoryOn: boolean; signedIn: boolean; syncLabel: string; onMemory: () => void; onNew: () => void; onTemporary: () => void; onSearch: () => void; onPlugins?: () => void; onRepo?: () => void; onTasks?: () => void; onWebSearch: () => void; onImage?: () => void;
   onSettings: () => void; onCollapse: () => void; onThread: (thread: Thread) => void;
   onDelete: (thread: Thread) => void; onAbout: () => void;
 }) {
@@ -26,11 +26,11 @@ export function Sidebar({ threads, activeId, availability, temporary, memoryOn, 
       <button className="search-trigger nav-button" type="button" onClick={onSearch} aria-keyshortcuts="Control+K Meta+K"><Search size={17} /><span>Search chats</span><kbd>{mac ? '⌘ K' : 'Ctrl K'}</kbd></button>
       <nav className="workspace-nav" aria-label="Workspace">
         <div className="sidebar-label">WORKSPACE</div>
-        <button type="button" className="nav-button" onClick={onPlugins}><Blocks size={17} /><span>Plugins</span></button>
+        {onPlugins && <button type="button" className="nav-button" onClick={onPlugins}><Blocks size={17} /><span>Plugins</span></button>}
         <button type="button" className="nav-button" onClick={onWebSearch}><Globe size={17} /><span>Web search</span></button>
-        <button type="button" className="nav-button" onClick={onRepo}><GitBranch size={17} /><span>GitHub projects</span></button>
+        {onRepo && <button type="button" className="nav-button" onClick={onRepo}><GitBranch size={17} /><span>GitHub projects</span></button>}
         {onTasks && <button type="button" className="nav-button" onClick={onTasks}><ListTodo size={17} /><span>Background tasks</span></button>}
-        <button type="button" className="nav-button" onClick={onImage}><ImagePlus size={17} /><span>Image Studio</span></button>
+        {onImage && <button type="button" className="nav-button" onClick={onImage}><ImagePlus size={17} /><span>Image Studio</span></button>}
         <button type="button" className="nav-button" onClick={onMemory}><Brain size={17} /><span>Memory</span>{memoryOn && <small className="memory-indicator">On</small>}</button>
       </nav>
       <section className="history-section" aria-label="Recent chats">

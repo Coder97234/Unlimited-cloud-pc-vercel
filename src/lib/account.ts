@@ -1,5 +1,5 @@
 import { ACCOUNT_AUTH_PATHS, isAccountId, isAccountProvider } from '../../shared/account.ts';
-import type { AccountLink, AccountProvider, AccountStatus } from '../../shared/account.ts';
+import type { AccountLink, AccountProvider, AccountStatus, EmailPurpose } from '../../shared/account.ts';
 import { emptyMemory, parseMemory } from '../../shared/memory.ts';
 import type { MemoryProfile } from '../../shared/memory.ts';
 import { forgetThreads } from './history.ts';
@@ -33,7 +33,8 @@ export async function loadAccount(signal: AbortSignal): Promise<AccountStatus> {
   const providers = Array.isArray(value.providers) ? value.providers.filter(isAccountProvider) : [];
   const user = value.user;
   if (user !== null && (!isAccountId(user?.id) || typeof user?.name !== 'string' || typeof user?.email !== 'string')) throw new Error('Could not verify your account.');
-  return { providers, user, passwords: value.passwords === true, background: value.background === true, settings: parsePreferences(value.settings) };
+  return { providers, user, passwords: value.passwords === true, background: value.background === true,
+    ...(value.passwords === true && value.emailVerification === 'code' && { emailVerification: 'code' as const }), settings: parsePreferences(value.settings) };
 }
 
 export async function startSignIn(provider: AccountProvider, signal: AbortSignal) {
@@ -60,13 +61,13 @@ function signedIn(result: { signedIn?: boolean }) {
 export async function passwordSignIn(email: string, password: string, signal: AbortSignal) {
   signedIn(await accountJson('', signal, { action: 'login', email, password }));
 }
-export async function requestAccountLink(action: 'request-signup' | 'request-reset', email: string, signal: AbortSignal) {
-  const result = await accountJson('', signal, { action, email });
+export async function requestAccountEmail(purpose: EmailPurpose, email: string, signal: AbortSignal) {
+  const result = await accountJson('', signal, { action: purpose === 'signup' ? 'request-signup' : 'request-reset', email });
   if (result.accepted !== true) throw new Error('Could not request the email. Try again.');
 }
-export async function finishAccountLink(link: AccountLink, password: string, signal: AbortSignal) {
-  const result = await accountJson('', signal, { action: link.purpose === 'signup' ? 'verify-email' : 'reset-password', token: link.token, password });
-  if (link.purpose === 'signup') return signedIn(result);
+export async function finishAccountEmail({ purpose, ...proof }: AccountLink | { purpose: EmailPurpose; email: string; code: string }, password: string, signal: AbortSignal) {
+  const result = await accountJson('', signal, { action: purpose === 'signup' ? 'verify-email' : 'reset-password', ...proof, password });
+  if (purpose === 'signup') return signedIn(result);
   if (result.reset !== true) throw new Error('Could not reset your password. Try again.');
   notifyAccountChange();
   window.location.replace('/?account=password-reset');

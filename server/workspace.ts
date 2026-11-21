@@ -1,9 +1,9 @@
-import { isProvider, publicApiTarget } from '../shared/workspace-tools.ts';
+import { isProvider, publicApiTarget, WORKSPACE_PLUGINS_ENABLED } from '../shared/workspace-tools.ts';
 import type { WorkspaceStatus } from '../shared/workspace-tools.ts';
 import { MAX_VISION_BASE64 } from '../shared/media.ts';
 import { readRepository } from './repositories.ts';
 import { runImage, runVision } from './media.ts';
-import { connectionStatus, disconnect, finishConnection, readConnection, startConnection, workspaceConfig } from './workspace-connections.ts';
+import { clearConnection, connectionStatus, disconnect, finishConnection, readConnection, startConnection, workspaceConfig } from './workspace-connections.ts';
 import type { WorkspaceConfig } from './workspace-connections.ts';
 import { asObject, boundedJson, providerJson, shortText, ToolError } from './workspace-http.ts';
 
@@ -35,7 +35,18 @@ async function runPublicApi(target: unknown, signal: AbortSignal) {
   return { endpoint: spec.endpoint, data: result };
 }
 
-export async function handleWorkspace(request: Request, config: WorkspaceConfig = workspaceConfig(process.env), { limit = true } = {}) {
+export async function handleWorkspace(request: Request, config?: WorkspaceConfig, options?: { limit?: boolean }) {
+  if (!WORKSPACE_PLUGINS_ENABLED) {
+    return Response.json({ error: 'Workspace plugins are paused.' }, {
+      status: 404,
+      headers: { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' },
+    });
+  }
+  return handleWorkspaceTools(request, config, options);
+}
+
+// Kept independently testable while the public route is paused.
+export async function handleWorkspaceTools(request: Request, config: WorkspaceConfig = workspaceConfig(process.env), { limit = true } = {}) {
   const url = new URL(request.url);
   const headers = new Headers({ 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' });
   const json = (value: object, status = 200) => Response.json(value, { status, headers });
@@ -71,7 +82,16 @@ export async function handleWorkspace(request: Request, config: WorkspaceConfig 
     if (!isProvider(provider)) throw new ToolError('Unknown account provider.');
     if (action === 'connect') return json({ url: startConnection(request, config, provider, headers) });
     if (action === 'disconnect') return json({ disconnected: true, revoked: await disconnect(request, config, provider, headers) });
-    if (action === 'account' && typeof operation === 'string') return json(await readConnection(request, config, provider, operation));
+    if (action === 'account' && typeof operation === 'string') {
+      try { return json(await readConnection(request, config, provider, operation, input.teamSlug)); }
+      catch (error) {
+        if (error instanceof ToolError && error.status === 401) {
+          clearConnection(provider, headers);
+          throw new ToolError('The connection expired or was revoked. Connect it again to continue.', 401);
+        }
+        throw error;
+      }
+    }
     throw new ToolError('Unknown tool action.');
   } catch (error) {
     const status = error instanceof ToolError ? error.status : 500;

@@ -6,7 +6,7 @@ import account from '../api/account.js';
 import analytics from '../api/analytics.js';
 import { guestAccount } from '../shared/account.ts';
 import { MODE_IDS } from '../shared/modes.ts';
-import { PUBLIC_API_EXAMPLE } from '../shared/workspace-tools.ts';
+import { PUBLIC_API_EXAMPLE, WORKSPACE_PLUGINS_ENABLED } from '../shared/workspace-tools.ts';
 import { WIBY_SEARCH_URL, WIKI_SEARCH_URL, searchWeb } from '../server/web-search.ts';
 import { ASSISTANT_PROFILE, DEFAULT_MODEL } from '../shared/models.ts';
 import { readChatEvents } from '../src/lib/stream.ts';
@@ -52,7 +52,7 @@ async function check(label, content, expected, { timeZone = 'UTC', searchQuery, 
   if (searchQuery) assert.ok(sources.every(({ excerpt }) => excerpt === undefined), 'Only source metadata should reach the client');
   console.log(`XYVORA_BUNDLE ${label}: first ${Math.round(first)}ms, finished ${Math.round(performance.now() - start)}ms, ${count} deltas${searchQuery ? `, ${sources.length} live sources` : ''}`);
 }
-await check('identity', 'Who made Xyvora AI?', /Xyvora AI.*xyvora\.net.*Ethan Bennett.*Noberto Dominguez.*xyvora\.net\/about/s, { source: 'skill', skill: 'about' });
+await check('identity', 'Who made Xyvora AI?', /Xyvora AI.*xyvora\.net.*Ethan Bennett.*Noberto Dominguez.*Elijah Richardson.*Developer.*xyvora\.net\/about/s, { source: 'skill', skill: 'about' });
 await check('calculator', 'What is 18% of 84.50?', /15\.21/, { source: 'skill', skill: 'calc' });
 await check('clock', '/time Tokyo', /\d{1,2}:\d{2}.*Asia\/Tokyo/, { source: 'clock', skill: 'time' });
 await check('fresh engine', 'What is the capital of France? Answer in one short sentence.', /paris/i);
@@ -81,27 +81,35 @@ const apiRequest = (data) => new Request('https://bundle-check.invalid/api/works
   method: 'POST', headers: { Origin: 'https://bundle-check.invalid', 'Content-Type': 'application/json' },
   body: JSON.stringify({ action: 'api', method: 'GET', target: PUBLIC_API_EXAMPLE, ...data }),
 });
-assert.equal((await workspace.fetch(apiRequest({ approved: false }))).status, 403);
-assert.equal((await workspace.fetch(apiRequest({ approved: true, target: 'https://example.invalid/' }))).status, 400);
-if (process.argv.includes('--plugins')) {
-  publicAllowed = true;
-  const reply = await workspace.fetch(apiRequest({ approved: true }));
-  assert.equal(reply.status, 200);
-  assert.equal((await reply.json()).data.name, 'octocat/Hello-World');
-  const npm = await workspace.fetch(apiRequest({ approved: true, target: 'https://registry.npmjs.org/react/latest' }));
-  assert.equal(npm.status, 200);
-  assert.match((await npm.json()).data.version, /^\d+\.\d+\.\d+/);
-  const readRepo = (operation, data) => workspace.fetch(apiRequest({ approved: true, action: 'repository', operation, repo: 'octocat/Hello-World', ...data }));
-  const overview = await readRepo('overview');
-  assert.equal(overview.status, 200);
-  const ref = (await overview.json()).repo.branch;
-  assert.equal(ref, 'master');
-  const files = await readRepo('files', { ref });
-  assert.equal(files.status, 200);
-  assert.ok((await files.json()).entries.some((entry) => entry.path === 'README'));
-  const file = await readRepo('file', { ref, path: 'README' });
-  assert.equal(file.status, 200);
-  assert.match((await file.json()).file.text, /Hello World/);
-  console.log('XYVORA_BUNDLE GitHub repo overview, directory/readme and API Explorer GitHub/npm reads passed');
+if (!WORKSPACE_PLUGINS_ENABLED) {
+  const response = await workspace.fetch(apiRequest({ approved: true }));
+  assert.equal(response.status, 404);
+  assert.equal(response.headers.get('cache-control'), 'no-store');
+  assert.equal((await workspace.fetch(new Request('https://bundle-check.invalid/api/workspace?code=old&state=old'))).status, 404);
+  console.log('XYVORA_BUNDLE plugin routes paused');
+} else {
+  assert.equal((await workspace.fetch(apiRequest({ approved: false }))).status, 403);
+  assert.equal((await workspace.fetch(apiRequest({ approved: true, target: 'https://example.invalid/' }))).status, 400);
+  if (process.argv.includes('--plugins')) {
+    publicAllowed = true;
+    const reply = await workspace.fetch(apiRequest({ approved: true }));
+    assert.equal(reply.status, 200);
+    assert.equal((await reply.json()).data.name, 'octocat/Hello-World');
+    const npm = await workspace.fetch(apiRequest({ approved: true, target: 'https://registry.npmjs.org/react/latest' }));
+    assert.equal(npm.status, 200);
+    assert.match((await npm.json()).data.version, /^\d+\.\d+\.\d+/);
+    const readRepo = (operation, data) => workspace.fetch(apiRequest({ approved: true, action: 'repository', operation, repo: 'octocat/Hello-World', ...data }));
+    const overview = await readRepo('overview');
+    assert.equal(overview.status, 200);
+    const ref = (await overview.json()).repo.branch;
+    assert.equal(ref, 'master');
+    const files = await readRepo('files', { ref });
+    assert.equal(files.status, 200);
+    assert.ok((await files.json()).entries.some((entry) => entry.path === 'README'));
+    const file = await readRepo('file', { ref, path: 'README' });
+    assert.equal(file.status, 200);
+    assert.match((await file.json()).file.text, /Hello World/);
+    console.log('XYVORA_BUNDLE GitHub repo overview, directory/readme and API Explorer GitHub/npm reads passed');
+  }
 }
 console.log(`XYVORA_BUNDLE peak RSS ${Math.round(process.resourceUsage().maxRSS / 1024)} MiB`);

@@ -1,12 +1,13 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { XYVORA_URL } from '../shared/models.ts';
+import { VERCEL_TEAM_SLUG, WORKSPACE_AUTH_PATHS } from '../shared/workspace-tools.ts';
 import type { ConnectionStatus, Provider } from '../shared/workspace-tools.ts';
 import { asObject, providerJson, shortText, ToolError } from './workspace-http.ts';
 
 const gmailScope = 'https://www.googleapis.com/auth/gmail.metadata';
 const providers = {
-  gmail: { authorize: 'https://accounts.google.com/o/oauth2/v2/auth', token: 'https://oauth2.googleapis.com/token', scope: gmailScope },
-  vercel: { authorize: 'https://vercel.com/oauth/authorize', token: 'https://api.vercel.com/login/oauth/token', scope: 'openid profile' },
+  gmail: { token: 'https://oauth2.googleapis.com/token', scope: gmailScope },
+  vercel: { token: 'https://api.vercel.com/login/oauth/token', scope: 'openid profile' },
 } as const;
 const authSeconds = 600;
 const sessionSeconds = 3_600;
@@ -22,17 +23,20 @@ export type WorkspaceConfig = {
 type Env = Record<string, string | undefined>;
 export function workspaceConfig(env: Env): WorkspaceConfig {
   let origin = XYVORA_URL;
-  if (env.XYVORA_WORKSPACE_ORIGIN) {
-    const parsed = new URL(env.XYVORA_WORKSPACE_ORIGIN);
-    if (parsed.protocol !== 'https:' || parsed.origin !== env.XYVORA_WORKSPACE_ORIGIN) throw new Error('XYVORA_WORKSPACE_ORIGIN must be an HTTPS origin without a path.');
-    origin = parsed.origin;
+  const configuredOrigin = env.XYVORA_WORKSPACE_ORIGIN?.trim();
+  if (configuredOrigin) {
+    try {
+      const parsed = new URL(configuredOrigin);
+      if (parsed.protocol !== 'https:' || parsed.origin !== configuredOrigin) return { origin, clients: {} };
+      origin = parsed.origin;
+    } catch { return { origin, clients: {} }; } // Fail closed only for credentialed tools.
   }
   const secret = env.XYVORA_CONNECT_SECRET;
   const sessionKey = secret && secret.length >= 32 ? createHash('sha256').update(secret).digest() : undefined;
   const clients: WorkspaceConfig['clients'] = {};
   for (const provider of ['gmail', 'vercel'] as const) {
     const prefix = `XYVORA_${provider.toUpperCase()}`;
-    const id = env[`${prefix}_CLIENT_ID`], clientSecret = env[`${prefix}_CLIENT_SECRET`];
+    const id = env[`${prefix}_CLIENT_ID`]?.trim(), clientSecret = env[`${prefix}_CLIENT_SECRET`]?.trim();
     if (env[`${prefix}_PLUGIN_ENABLED`] === '1' && sessionKey && id && clientSecret) clients[provider] = { id, secret: clientSecret };
   }
   const accessCode = env.XYVORA_IMAGE_ACCESS_CODE?.trim(), key = env.XYVORA_IMAGE_API_KEY?.trim();
@@ -94,7 +98,7 @@ export function startConnection(request: Request, config: WorkspaceConfig, provi
   const verifier = randomBytes(48).toString('base64url');
   const name = authCookie(provider);
   headers.append('set-cookie', cookie(name, seal(config, name, { state, verifier, expires: Date.now() + authSeconds * 1_000 }), authSeconds));
-  const auth = new URL(providers[provider].authorize);
+  const auth = new URL(WORKSPACE_AUTH_PATHS[provider]);
   auth.search = new URLSearchParams({
     client_id: client.id, redirect_uri: callback(config), response_type: 'code', state,
     code_challenge: createHash('sha256').update(verifier).digest('base64url'), code_challenge_method: 'S256',
@@ -140,9 +144,13 @@ export async function finishConnection(request: Request, config: WorkspaceConfig
   return new Response(null, { status: 303, headers });
 }
 
+export function clearConnection(provider: Provider, headers: Headers) {
+  headers.append('set-cookie', cookie(connectionCookie(provider), '', 0));
+}
+
 export async function disconnect(request: Request, config: WorkspaceConfig, provider: Provider, headers: Headers) {
   const token = sessionToken(request, config, provider);
-  headers.append('set-cookie', cookie(connectionCookie(provider), '', 0));
+  clearConnection(provider, headers);
   headers.append('set-cookie', cookie(authCookie(provider), '', 0));
   const client = config.clients[provider];
   if (!token || !client) return false;
@@ -155,7 +163,7 @@ export async function disconnect(request: Request, config: WorkspaceConfig, prov
   } catch { return false; } // Clear the local session even when provider revocation fails.
 }
 
-export async function readConnection(request: Request, config: WorkspaceConfig, provider: Provider, operation: string) {
+export async function readConnection(request: Request, config: WorkspaceConfig, provider: Provider, operation: string, teamSlug?: unknown) {
   const token = sessionToken(request, config, provider);
   if (!token) throw new ToolError('Connect this account first. The connection may have expired.', 401);
   const options = { headers: { Authorization: `Bearer ${token}` } };
@@ -167,19 +175,37 @@ export async function readConnection(request: Request, config: WorkspaceConfig, 
     const results = await Promise.all(ids.map(async (id) => {
       const params = new URLSearchParams({ format: 'metadata', fields: 'payload(headers)' });
       for (const name of ['Subject', 'From', 'Date']) params.append('metadataHeaders', name);
-      const message = await providerJson(`${base}/${id}?${params}`, request.signal, options, { limit: 24_000 });
+      let message;
+      try { message = await providerJson(`${base}/${id}?${params}`, request.signal, options, { limit: 24_000 }); }
+      catch (error) {
+        // Incoming mail can be deleted between the list and metadata calls.
+        if (error instanceof ToolError && error.status === 404) return;
+        throw error;
+      }
       const { headers } = asObject(message.payload);
       const lookup = (name: string) => shortText(asObject((Array.isArray(headers) ? headers : []).find((header) => shortText(asObject(header).name).toLowerCase() === name)).value);
       return { subject: lookup('subject') || '(no subject)', from: lookup('from'), date: lookup('date') };
     }));
-    return { messages: results };
+    return { messages: results.filter((message) => message !== undefined) };
   }
   if (provider === 'vercel' && operation === 'profile') {
     const profile = await providerJson('https://api.vercel.com/login/oauth/userinfo', request.signal, { ...options, method: 'POST' });
     return { name: shortText(profile.name), username: shortText(profile.preferred_username ?? profile.username) };
   }
   if (provider === 'vercel' && operation === 'projects') {
-    const data = await providerJson('https://api.vercel.com/v9/projects?limit=8', request.signal, options, { limit: 320_000 });
+    const url = new URL('https://api.vercel.com/v10/projects?limit=8');
+    if (teamSlug !== undefined && teamSlug !== '') {
+      if (typeof teamSlug !== 'string' || !VERCEL_TEAM_SLUG.test(teamSlug)) throw new ToolError('Enter a valid Vercel team slug or leave it blank.');
+      url.searchParams.set('slug', teamSlug);
+    }
+    let data;
+    try { data = await providerJson(url.href, request.signal, options, { limit: 320_000 }); }
+    catch (error) {
+      if (error instanceof ToolError && error.status === 403) {
+        throw new ToolError('Vercel didn’t grant read access to those projects. Check the team slug and approve Projects read access in Vercel.', 403);
+      }
+      throw error;
+    }
     return { projects: (Array.isArray(data.projects) ? data.projects : []).slice(0, 8).map((item) => {
       const project = asObject(item);
       return { name: shortText(project.name), framework: shortText(project.framework), updatedAt: typeof project.updatedAt === 'number' ? project.updatedAt : undefined };

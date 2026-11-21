@@ -1,4 +1,5 @@
 import { DEFAULT_MODE, isReplyMode, modeContext, MODE_IDS } from '../shared/modes.ts';
+import { checkedCreatorStream, mentionsCreator, verifiedTeamReply } from '../shared/creator-policy.ts';
 import { brandedStream } from '../shared/branding.ts';
 import { ASSISTANT_PROFILE, DEFAULT_MODEL, MAX_ATTACHMENT, MAX_CONTEXT, MAX_MESSAGES, MAX_PROMPT, REPLY_SKILL_HEADER, REPLY_SOURCE_HEADER, withAttachment } from '../shared/models.ts';
 import type { Availability, ChatMessage, ReplySource, TextAttachment } from '../shared/models.ts';
@@ -6,7 +7,7 @@ import { allowsSearchToggle, explicitSearchQuery, MAX_SEARCH_QUERY } from '../sh
 import { parseMemoryNotes, preferencesContext } from '../shared/memory.ts';
 import { readSkillCommand, SKILL_IDS, skillAvailable } from '../shared/skill-catalog.ts';
 import type { SkillResultId } from '../shared/skill-catalog.ts';
-import { modelMessage, runInstantSkill } from '../shared/skills.ts';
+import { modelMessage, runInstantSkill, teamAnswerSkill } from '../shared/skills.ts';
 import { clockReply, contextualClock, validTimeZone } from './clock.ts';
 import { inferenceStream } from './inference-stream.ts';
 import type { ServerGenerate } from './inference-stream.ts';
@@ -162,6 +163,8 @@ export async function handleChat(request: Request, options: ChatOptions = {}): P
   if (options.limit && !mayRequest(ip, !!input.query)) return json({ error: 'Too many requests. Wait a minute and try again.' }, 429, { 'Retry-After': '60' });
 
   const now = options.now?.() ?? new Date();
+  const team = teamAnswerSkill(prompt);
+  if (team || (input.query && mentionsCreator(input.query))) return instantReply(team?.text ?? verifiedTeamReply, 'skill', 'about');
   if (!input.query) {
     const skill = runInstantSkill(prompt, input.attachment?.text);
     if (skill) return instantReply(skill.text, 'skill', skill.id);
@@ -169,8 +172,15 @@ export async function handleChat(request: Request, options: ChatOptions = {}): P
     if (clock) return instantReply(clock, 'clock', 'time');
   }
 
+  if (input.attachment && mentionsCreator(`${input.attachment.name}\n${input.attachment.text}`)) return instantReply(verifiedTeamReply, 'skill', 'about');
   const modelPrompt = input.query ? withAttachment(prompt, input.attachment) : modelMessage(prompt, input.attachment);
-  const messages = input.messages;
+  // Drop older pairs through any explicit creator reference, so a new unrelated
+  // request doesn't inherit a prior roleplay instruction or personal attack.
+  let from = 0;
+  for (let i = 0; i + 2 < input.messages.length; i += 2) {
+    if (mentionsCreator(`${input.messages[i].content}\n${input.messages[i + 1].content}`)) from = i + 2;
+  }
+  const messages = input.messages.slice(from);
   if (modelPrompt !== prompt) {
     const historyLength = messages.slice(0, -1).reduce((sum, message) => sum + message.content.length, 0);
     if (historyLength + modelPrompt.length > MAX_CONTEXT) return json({ error: 'This conversation is too long. Shorten your prompt or attachment and try again.' }, 413);
@@ -185,12 +195,13 @@ export async function handleChat(request: Request, options: ChatOptions = {}): P
   }
 
   const task = !input.query && readSkillCommand(prompt)?.id === 'translate' ? 'translate' : undefined;
-  const preferences = !task && input.memory
-    ? preferencesContext(input.memory, MAX_CONTEXT - messages.reduce((sum, message) => sum + message.content.length, 0))
+  const notes = input.memory?.filter((note) => !mentionsCreator(note));
+  const preferences = !task && notes?.length
+    ? preferencesContext(notes, MAX_CONTEXT - messages.reduce((sum, message) => sum + message.content.length, 0))
     : undefined;
 
   return reply(inferenceStream(async (signal, output) => {
-    const sources = input.query && search ? await search(input.query, signal) : undefined;
+    const sources = input.query && search ? (await search(input.query, signal)).filter(({ title, excerpt }) => !mentionsCreator(`${title}\n${excerpt ?? ''}`)) : undefined;
     if (sources) {
       output.sources(sources.map(({ title, url, provider }) => ({ title, url, provider })));
       if (sources.length === 0) {
@@ -198,8 +209,17 @@ export async function handleChat(request: Request, options: ChatOptions = {}): P
         return;
       }
     }
-    const branded = brandedStream(output.text);
-    await generate(messages, signal, branded.text, { sources, task, ...(preferences && { preferences }), clock: task ? undefined : contextualClock(prompt, input.timeZone, now), mode: input.mode });
+    const stop = new AbortController();
+    const checked = checkedCreatorStream(output.text, () => stop.abort());
+    const branded = brandedStream(checked.text);
+    try {
+      await generate(messages, AbortSignal.any([signal, stop.signal]), branded.text, { sources, task,
+        ...(preferences && !mentionsCreator(preferences) && { preferences }),
+        clock: task ? undefined : contextualClock(prompt, input.timeZone, now), mode: input.mode });
+    } catch (error) {
+      if (!stop.signal.aborted || signal.aborted) throw error;
+    }
     branded.finish();
+    checked.finish();
   }, request.signal), 'server');
 }

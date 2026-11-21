@@ -1,3 +1,7 @@
+// Release switch for the whole workspace add-on surface. Provider settings
+// cannot reopen the route while Plugins are paused. Sign-in is separate.
+export const WORKSPACE_PLUGINS_ENABLED = false;
+
 export const PLUGINS = {
   script: { name: 'Script Lab', summary: 'Run JavaScript on this device in an isolated engine. No network, account access, or shell.', example: '/run console.log(20 * 6)' },
   image: { name: 'Image Studio', summary: 'Generate or analyze images with a configured provider, or make local 4K graphics.', example: '/image Violet mountains at dusk' },
@@ -12,6 +16,8 @@ export type Provider = 'gmail' | 'vercel';
 export type PluginIntent = { id: PluginId; input?: string };
 export type ConnectionStatus = 'unconfigured' | 'disconnected' | 'connected';
 export type WorkspaceStatus = { connections: Record<Provider, ConnectionStatus>; hostedImages: boolean; hostedVision: boolean };
+export const WORKSPACE_AUTH_PATHS = { gmail: 'https://accounts.google.com/o/oauth2/v2/auth', vercel: 'https://vercel.com/oauth/authorize' } as const;
+export const VERCEL_TEAM_SLUG = /^[a-z0-9][a-z0-9-]{0,61}$/;
 export const isProvider = (value: unknown): value is Provider => value === 'gmail' || value === 'vercel';
 
 // Read only the user's current message. Never interpret a generated reply,

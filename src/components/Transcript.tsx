@@ -4,7 +4,7 @@ import { XYVORA_NAME } from '../../shared/models.ts';
 import { skillName } from '../../shared/skill-catalog.ts';
 import { DEFAULT_MODE, MODES } from '../../shared/modes.ts';
 import type { Answer, Thread, Turn } from '../lib/history.ts';
-import { hasCompletedWord, hopMascot } from '../lib/mascot-motion.ts';
+import { hasCompletedWord, floatMascot } from '../lib/mascot-motion.ts';
 import { Mascot } from './Brand.tsx';
 import MarkdownAnswer from './MarkdownAnswer.tsx';
 
@@ -34,7 +34,7 @@ function AnswerCard({ answer, archived, searching, onRetry, onBranch, onAlert }:
     const justFinished = previous.working && state === 'finished';
     if (!mascot.current || (!working && !justFinished)) return;
     const from = previous.working && previous.length <= content.length ? previous.length : 0;
-    if (hasCompletedWord(content, from, justFinished)) hopMascot(mascot.current);
+    if (hasCompletedWord(content, from, justFinished)) floatMascot(mascot.current);
   }, [content, state, working]);
   return <article className="answer-card" aria-label={`${clock || instant ? badge : name} response`}>
     <header className="answer-heading">

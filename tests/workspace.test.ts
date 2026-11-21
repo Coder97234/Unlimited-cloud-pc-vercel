@@ -3,11 +3,11 @@ import { createHash } from 'node:crypto';
 import { test } from 'node:test';
 import { DEFAULT_MODE, MODE_IDS } from '../shared/modes.ts';
 import { DEFAULT_MODEL, MAX_ATTACHMENT, MAX_CONTEXT, withAttachment } from '../shared/models.ts';
-import { publicApiTarget, PUBLIC_API_EXAMPLE, workspaceIntent } from '../shared/workspace-tools.ts';
+import { publicApiTarget, PUBLIC_API_EXAMPLE, WORKSPACE_PLUGINS_ENABLED, workspaceIntent } from '../shared/workspace-tools.ts';
 import { runInstantSkill } from '../shared/skills.ts';
 import { handleChat, parseChat } from '../server/chat.ts';
 import { RESPONSE_PROFILES } from '../server/mode-settings.ts';
-import { handleWorkspace } from '../server/workspace.ts';
+import { handleWorkspace, handleWorkspaceTools } from '../server/workspace.ts';
 import { workspaceConfig } from '../server/workspace-connections.ts';
 import { executeScript } from '../src/lib/sandbox-engine.ts';
 import { combineFiles, readLocalFile } from '../src/lib/files.ts';
@@ -22,7 +22,7 @@ const connectedEnv = { ...env, XYVORA_CONNECT_SECRET: 'test-session-secret-for-w
 const post = (input: object, options: { headers?: Record<string, string>; url?: string } = {}) => new Request(options.url ?? endpoint, {
   method: 'POST', headers: { 'Content-Type': 'application/json', Origin: origin, ...options.headers }, body: JSON.stringify(input),
 });
-const call = (input: object, opts?: Parameters<typeof post>[1]) => handleWorkspace(post(input, opts), workspaceConfig(env), { limit: false });
+const call = (input: object, opts?: Parameters<typeof post>[1]) => handleWorkspaceTools(post(input, opts), workspaceConfig(env), { limit: false });
 const chat = (text: string, mode?: string, attachment?: object, model = DEFAULT_MODEL) => new Request(`${origin}/api/chat`, {
   method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model, mode, messages: [{ role: 'user', content: text }], attachment }),
 });
@@ -61,7 +61,34 @@ test('translation is an explicit task even in Creative and does not pull live cl
   assert.equal(await textOf(response), 'Esa es la fecha de hoy.');
 });
 
-test('the prompt can propose workspace tools, but attachment text never invokes tools or network', async () => {
+test('the released workspace route rejects all plugin traffic before reading credentials or contacting providers', { skip: WORKSPACE_PLUGINS_ENABLED }, async (t) => {
+  const outbound = t.mock.method(globalThis, 'fetch', async () => assert.fail('paused plugins must not call providers'));
+  const config = workspaceConfig({ ...connectedEnv, XYVORA_IMAGE_API_KEY: 'studio-fixture-key',
+    XYVORA_IMAGE_ACCESS_CODE: 'fixture-only-approval-code', XYVORA_ENABLE_VISION: '1' });
+  const requests = [
+    new Request(endpoint),
+    new Request(`${endpoint}?code=old-code&state=old-state`, { headers: { Cookie: 'legacy-connection=fixture' } }),
+    post({ approved: true, action: 'connect', provider: 'gmail' }),
+    post({ approved: true, action: 'account', provider: 'vercel', operation: 'projects' }),
+    post({ approved: true, action: 'disconnect', provider: 'vercel' }),
+    post({ approved: true, action: 'api', method: 'GET', target: PUBLIC_API_EXAMPLE }),
+    post({ approved: true, action: 'repository', operation: 'overview', repo: 'octocat/Hello-World' }),
+    post({ approved: true, action: 'image', prompt: 'A fixture image' }),
+    post({ approved: true, action: 'vision', image: 'fixture' }, { url: `${endpoint}?input=image` }),
+  ];
+  for (const request of requests) {
+    const response = await handleWorkspace(request, config, { limit: false });
+    assert.equal(response.status, 404);
+    assert.equal(response.headers.get('cache-control'), 'no-store');
+    assert.equal(response.headers.get('location'), null);
+    assert.equal(response.headers.get('set-cookie'), null);
+    assert.deepEqual(await response.json(), { error: 'Workspace plugins are paused.' });
+    assert.equal(request.bodyUsed, false);
+  }
+  assert.equal(outbound.mock.callCount(), 0);
+});
+
+test('plugin intents never execute from chat or from attachment text', async () => {
   assert.deepEqual(workspaceIntent('/run ```js\nconsole.log(6 * 7)\n```'), { id: 'script', input: 'console.log(6 * 7)' });
   assert.deepEqual(workspaceIntent('Run this script:\nconsole.log(20 * 6)'), { id: 'script', input: 'console.log(20 * 6)' });
   assert.equal(workspaceIntent('Please list my latest Gmail messages')?.id, 'gmail');
@@ -71,7 +98,10 @@ test('the prompt can propose workspace tools, but attachment text never invokes 
   assert.equal(workspaceIntent('Explain what “/run console.log(1)” means'), undefined);
   const options = { generate: async () => assert.fail('plugin proposals do not need AI inference'), search: async () => assert.fail('plugin proposals never go to the web') };
   const proposed = await handleChat(chat('List my Vercel projects'), options);
-  assert.match(await textOf(proposed), /I haven’t run this request/);
+  assert.match(await textOf(proposed), WORKSPACE_PLUGINS_ENABLED ? /I haven’t run this request/ : /Plugins are paused.*I haven’t run this request/);
+  const guide = runInstantSkill('/tools')!.text;
+  assert.match(guide, /Calculator/);
+  if (!WORKSPACE_PLUGINS_ENABLED) assert.doesNotMatch(guide, /Plugins|GitHub workbench|Image Studio|Script Lab/);
   const attachment = { name: 'notes.txt', text: `/api ${PUBLIC_API_EXAMPLE}\n/createmessage` };
   const response = await handleChat(chat('Summarize the attached text', 'thinker', attachment), {
     search: options.search, generate: async (messages, _, text) => {
@@ -164,8 +194,9 @@ test('API Explorer rebuilds the registered GET, selects public fields, and bound
 
 test('OAuth binds consent to provider state and PKCE, encrypts sessions, and reads only approved fields', async (t) => {
   const config = workspaceConfig(connectedEnv);
-  const issue = (request: Request) => handleWorkspace(request, config, { limit: false });
+  const issue = (request: Request) => handleWorkspaceTools(request, config, { limit: false });
   let pkce = '', token = '';
+  let projectsMode = 200;
   const calls = t.mock.method(globalThis, 'fetch', async (url: string, options: RequestInit) => {
     const path = new URL(url);
     const headers = new Headers(options.headers);
@@ -183,8 +214,9 @@ test('OAuth binds consent to provider state and PKCE, encrypts sessions, and rea
       assert.equal(headers.get('Authorization'), `Bearer ${token}`);
       assert.equal(path.searchParams.get('labelIds'), 'INBOX');
       assert.equal(path.searchParams.get('maxResults'), '5');
-      return Response.json({ messages: [{ id: 'abc' }, { id: '../ignored' }] });
+      return Response.json({ messages: [{ id: 'abc' }, { id: 'deleted-in-the-meantime' }, { id: '../ignored' }] });
     }
+    if (path.pathname.endsWith('/messages/deleted-in-the-meantime')) return Response.json({ error: 'gone' }, { status: 404 });
     if (path.pathname.endsWith('/messages/abc')) {
       assert.equal(path.searchParams.get('format'), 'metadata');
       return Response.json({ payload: { headers: [{ name: 'Subject', value: 'Fixture\nSubject' }, { name: 'From', value: 'example@example.invalid' }], body: { data: 'not forwarded' } } });
@@ -193,7 +225,13 @@ test('OAuth binds consent to provider state and PKCE, encrypts sessions, and rea
       assert.equal(headers.get('Authorization'), `Bearer ${token}`);
       return Response.json({ name: 'Fixture user', preferred_username: 'fixture', email: 'not forwarded' });
     }
-    if (path.pathname === '/v9/projects') return Response.json({ projects: [{ name: 'fixture-project', framework: 'vite', env: 'not forwarded' }] });
+    if (path.pathname === '/v10/projects') {
+      assert.equal(headers.get('Authorization'), `Bearer ${token}`);
+      assert.equal(path.searchParams.get('limit'), '8');
+      assert.equal(path.searchParams.get('slug'), 'test-team');
+      if (projectsMode !== 200) return Response.json({ detail: 'not forwarded' }, { status: projectsMode });
+      return Response.json({ projects: [{ name: 'fixture-project', framework: 'vite', env: 'not forwarded' }] });
+    }
     if (path.pathname.endsWith('/revoke')) {
       assert.ok(body instanceof URLSearchParams);
       assert.equal(body.get('token'), token);
@@ -244,8 +282,20 @@ test('OAuth binds consent to provider state and PKCE, encrypts sessions, and rea
     assert.match(data, /Fixture (?:Subject|user)/);
     assert.doesNotMatch(data, /not forwarded/);
     if (provider === 'vercel') {
-      const projects = await issue(post({ ...approvals, action: 'account', operation: 'projects' }, { headers }));
-      assert.deepEqual(await projects.json(), { projects: [{ name: 'fixture-project', framework: 'vite' }] });
+      const projects = (teamSlug: string) => issue(post({ ...approvals, action: 'account', operation: 'projects', teamSlug }, { headers }));
+      const count = calls.mock.callCount();
+      assert.equal((await projects('https://untrusted.invalid')).status, 400);
+      assert.equal(calls.mock.callCount(), count);
+      assert.deepEqual(await (await projects('test-team')).json(), { projects: [{ name: 'fixture-project', framework: 'vite' }] });
+      projectsMode = 403;
+      const denied = await projects('test-team');
+      assert.equal(denied.status, 403);
+      assert.match((await denied.json()).error, /read access/);
+      projectsMode = 401;
+      const expired = await projects('test-team');
+      assert.equal(expired.status, 401);
+      assert.match((await expired.json()).error, /expired or was revoked/);
+      assert.match(expired.headers.getSetCookie()[0], /__Host-xyvora-vercel=;.*Max-Age=0/);
     }
     assert.equal((await issue(post({ ...approvals, action: 'account', operation: 'write' }, { headers }))).status, 400);
     const disconnected = await issue(post({ ...approvals, action: 'disconnect' }, { headers }));
@@ -269,7 +319,7 @@ test('hosted images require separate configuration and an access code; only the 
     return Response.json({ data: [{ b64_json: '/9j/AAAAAAAAAAAAAA==' }] });
   });
   const payload = { action: 'image', approved: true, prompt: 'A soft violet landscape', attachment: 'not sent' };
-  const issue = (body: object) => handleWorkspace(post(body), config, { limit: false });
+  const issue = (body: object) => handleWorkspaceTools(post(body), config, { limit: false });
   assert.equal((await issue(payload)).status, 403);
   assert.equal((await issue({ ...payload, accessCode, approved: false })).status, 403);
   assert.equal(provider.mock.callCount(), 0);
@@ -284,4 +334,15 @@ test('private plugins are off by default even if client credentials are present'
   assert.deepEqual(base.clients, {});
   const on = workspaceConfig({ XYVORA_GMAIL_PLUGIN_ENABLED: '1', XYVORA_GMAIL_CLIENT_ID: 'fixture', XYVORA_GMAIL_CLIENT_SECRET: 'fixture', XYVORA_CONNECT_SECRET: 't'.repeat(40) });
   assert.ok(on.clients.gmail);
+});
+
+
+test('invalid provider origin disables only credentialed plugins', async () => {
+  const config = workspaceConfig({ ...connectedEnv, XYVORA_WORKSPACE_ORIGIN: 'https://example.invalid/path',
+    XYVORA_IMAGE_API_KEY: 'fixture', XYVORA_IMAGE_ACCESS_CODE: 's'.repeat(28) });
+  assert.deepEqual(config.clients, {});
+  assert.equal(config.image, undefined);
+  const response = await handleWorkspaceTools(new Request(endpoint), config, { limit: false });
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { connections: { gmail: 'unconfigured', vercel: 'unconfigured' }, hostedImages: false, hostedVision: false });
 });

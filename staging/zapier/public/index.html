@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#100e19">
+  <title>Xyvora · Zapier staging</title>
+  <link rel="icon" href="/orbit.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/stage.css">
+  <script type="module" src="/stage.js"></script>
+</head>
+<body>
+  <header class="bar wrap">
+    <div class="brand"><img src="/orbit.svg" width="38" height="38" alt="">Xyvora</div>
+    <a href="https://xyvora.net">Main site <span aria-hidden="true">↗</span></a>
+  </header>
+  <main class="wrap">
+    <div class="intro">
+      <p class="eyebrow"><span></span> Integrations / Staging</p>
+      <h1>Zapier connection setup</h1>
+      <p class="lead">An isolated test site for Xyvora’s first Zapier integration. Your live workspace and account data stay separate.</p>
+    </div>
+    <div class="grid">
+      <section class="card" aria-labelledby="domain-title">
+        <div class="card-head">
+          <h2 id="domain-title">Allowed domain</h2>
+          <span class="status" id="host-status">Checking origin</span>
+        </div>
+        <p id="host-hint">Only add this hostname in Zapier after the staging page is reachable over HTTPS.</p>
+        <div class="copy">
+          <input id="domain" aria-label="Staging hostname" value="connect-staging.xyvora.net" readonly spellcheck="false">
+          <button type="button" id="copy" hidden>Copy</button>
+        </div>
+        <p id="copy-note" class="assist" role="status"></p>
+        <a class="primary" href="https://mcp.zapier.com/manage/embed/config" target="_blank" rel="noopener noreferrer">Open Zapier settings <span aria-hidden="true">↗</span></a>
+      </section>
+      <section class="card" aria-labelledby="pilot-title">
+        <div class="card-head">
+          <h2 id="pilot-title">Pilot status</h2>
+          <span class="status pending">Not connected</span>
+        </div>
+        <p><strong>Public embed ID received.</strong> The embed is off on this public page. No accounts are connected and no lookups run here.</p>
+        <ul>
+          <li>Test Google account and dummy sheet only</li>
+          <li>Read-only lookup, never create a row</li>
+          <li>Review and approve every lookup</li>
+        </ul>
+      </section>
+    </div>
+    <section class="next" aria-labelledby="next-title">
+      <h2 id="next-title">Next: a protected test</h2>
+      <p>In Zapier, use <strong>Xyvora AI</strong> as the company name and save the exact hostname above under <strong>Allowed Domains</strong>. If those settings are already saved, you’re done with that screen.</p>
+      <p>The first lookup will run separately in a protected, signed-in setup. There’s no need to resend the ID. Never share the embed secret, a connection token, or a private MCP server URL.</p>
+    </section>
+  </main>
+  <footer class="wrap">Xyvora staging · No live connections</footer>
+</body>
+</html>

@@ -2,7 +2,7 @@
 
 [Xyvora AI](https://xyvora.net) is a chat and tools workspace. **Normal** is the default for new chats. **Instant** prioritizes a quick, short reply with at most one small preceding exchange and a 96-token chat reply limit. Explicit translation keeps Normal’s longer output budget. **Thinker** asks the assistant to check assumptions and explain a conclusion; **Pro** asks for practical steps and verification; **Creative** uses more varied sampling for ideas and stories. These modes change instructions and generation settings, not the underlying engine or tool permissions. Earlier conversations remain readable in local history.
 
-The welcome screen and animated frog keep the supplied Xyvora art. The welcome logo has a responsive HD version. Download the transparent **3840 × 1284** light and dark lockups from **About**. These are sharpened, high-resolution exports of the supplied artwork, not a new mascot or vector tracing. Reduced-motion preferences still disable the frog’s hop and blink.
+Orbit is Xyvora's violet, ringed robot mascot. The same small SVG renders in the welcome screen, composer, replies, and About. Orbit floats briefly at word boundaries and stays still with reduced motion. [About](https://xyvora.net/about) has the SVG and transparent **3840 × 1284** logos. Re-render the raster exports with `node scripts/render-brand.mjs` after installing Playwright Chromium.
 
 ## Chat controls
 
@@ -21,6 +21,8 @@ See the [feature roadmap](docs/product-roadmap.md) for existing capabilities, pr
 
 ## Chat tools
 
+Xyvora answers recognized questions about its creators using the public team credits instead of generating an opinion. The server checks generated text before releasing each sentence or line, also covering translation, queued replies and image descriptions. These controls don’t prohibit criticism of the product. As with any language model, indirect or unrecognized references may not be caught; deterministic tool output can include text you supplied.
+
 Ask naturally, or send `/tools` for examples. There are no dedicated Skills or Local time buttons.
 
 | Tool | Example | Runs on |
@@ -38,33 +40,35 @@ Web search uses the keyless, rate-limited [Wiby](https://wiby.me/json/) and [Eng
 
 ## Accounts, saved memory, and files
 
-- **Sign in** or **sign up** from the top bar when accounts are enabled. Verify your email before setting a password; **Forgot password?** sends a reset link. Google, GitHub, and optional Discord sign-in only appear when enabled. Sign-in does not authorize private plugins.
+- **Sign in** from the top bar or **Create an account** from the welcome screen when accounts are enabled. Verify your email before setting a password; **Forgot password?** sends a recovery email. [Bird Mailboxes](docs/bird-setup.md) delivers one-time codes, while Resend sends links. Google, GitHub, and optional Discord sign-in only appear when enabled. Accounts are optional; choose **Continue as guest** to keep using chat on this device.
 - Signed-in chats, theme, default reply mode, and up to 100 memory notes sync through PostgreSQL. Guest and Temporary chats do not sync. Use Workspace settings to import an older local copy from the same signed-in account, export chat as Markdown, or clear saved history. Use Memory to control whether a bounded set of recent notes can inform replies. Explicit translation, Temporary Chat, This message only, and image analysis do not use them.
-- Attach or drop images, text-based PDFs, or code/text files in the composer to preview them locally. PDF previews show extracted text; scanned PDFs need OCR. Hosted image analysis, when enabled, requires review/approval and an access code before Xyvora sends a resized JPEG and the question to OpenAI. No image bytes are added to saved chats. Without hosted vision, image preview is on-device only.
+- Attach or drop images, text-based PDFs, or code/text files in the composer to preview them locally. PDF previews show extracted text; scanned PDFs need OCR. Image analysis is paused; photo previews stay on-device and cannot be sent for a reply.
 - Use `Cmd/Ctrl+K` to search chats, `Cmd/Ctrl+Shift+N` for a new chat, or `?` outside an input to view shortcuts. If the browser reserves a shortcut, the controls are also available in the sidebar and Workspace settings.
 
-See the [production launch runbook](docs/launch-runbook.md) for database migrations, roles and retention, email verification/reset, OAuth, the worker, and the release checklist. No production service uses the local test database.
+See the [production launch runbook](docs/launch-runbook.md) for database migrations, roles and retention, email verification/reset, OAuth, the worker, and the release checklist. For [Supabase setup](docs/supabase-setup.md), use scoped PostgreSQL roles and keep the Data API off the account data. No production service uses the local test database.
 
-## Plugins and approvals
+## Plugins (paused)
 
-Open **Plugins** (`Ctrl`/`⌘` + `/`) or ask in chat. The current user message can open a review panel; assistant replies, attached text, and provider output never initiate an action. Nothing runs just by opening a panel.
+This release leaves the Plugins panel and its `/api/workspace` routes off. Account sign-in, guest chat, Web search, text/PDF attachments, and built-in tools such as `/calc` are separate. No Zapier or Sheets connection is needed.
+
+The following are retained implementation notes for a future plugin release. When enabled, only the current user message can open a review panel; assistant replies, attached text, and provider output never initiate an action. Nothing runs just by opening a panel.
 
 - **Script Lab** — `/run console.log(20 * 6)`. Review and run synchronous JavaScript in a QuickJS WebAssembly engine inside a disposable browser worker. No shell, packages, network, DOM, storage, or account access. Each run has a time, memory, input, and output limit. Attached text is opt-in as `input`. A complete attached `.js`/`.mjs` file can be loaded into the editor with `Run the attached JavaScript`.
 - **Image Studio** — `/image Violet mountains at dusk`. Generate and download 4K abstract posters locally, without uploading a prompt. The separate **AI images** tab generates a square, landscape, or portrait JPEG through a configured OpenAI project. It requires explicit approval and a studio access code. **Analyze image** opens the chat attachment workflow.
 - **GitHub projects** — `/repo octocat/Hello-World`. Approve public repository, file, and issue reads; choose a branch; edit a local copy; and review/download a unified diff. Grab a UTF-8 file under 24 KB to attach an excerpt to a chat draft. No push, PR creation, private repository access, or automatic code execution. Review patches before applying (for example, `git apply --check xyvora-repository.patch`).
 - **API Explorer** — `/api https://api.github.com/repos/octocat/Hello-World`. Review the exact GET before sending. Public GitHub repository/latest-release endpoints and `https://registry.npmjs.org/package/latest` are supported; no custom destinations, methods, headers, redirects, or keys. Only selected response fields are shown as text.
 - **Gmail** — “Show my latest Gmail messages.” Once connected, approve reading up to five inbox messages’ subject, sender, and date. No bodies, drafts, or sending.
-- **Vercel** — “List my Vercel projects.” Once connected, approve reading the profile or listing up to eight projects in the authorized context. Project access requires the provider’s resource-read grant. No deployment, project, or environment changes.
+- **Vercel** — “List my Vercel projects.” Once connected, approve reading the profile or listing up to eight projects in the authorized context. Project access requires the provider’s resource-read grant. Enter an optional team slug to read that granted scope. No deployment, project, or environment changes.
 
 Script and public API results can be placed in a draft; they are never sent to chat automatically. Account results stay in the plugin window and aren’t added to history or model context.
 
 ### Configure read-only connections and hosted image tools (optional)
 
-Local chat tools, graphics, Script Lab, and the public API Explorer do not require OAuth credentials. The Arena Gmail and Vercel connections are **not** credentials for the public Xyvora app.
+Do not configure these tools for the sign-in release. The shared `WORKSPACE_PLUGINS_ENABLED` release switch in `shared/workspace-tools.ts` must be deliberately changed before any of these settings can take effect. The Arena Gmail and Vercel connections are **not** credentials for the public Xyvora app.
 
 1. Set `XYVORA_WORKSPACE_ORIGIN` to the app’s exact HTTPS origin (defaults to `https://xyvora.net`). Configure a dedicated random `XYVORA_CONNECT_SECRET` (at least 32 characters; for example `openssl rand -hex 32`). Register **`https://xyvora.net/api/workspace`** as the OAuth callback for each app, substituting your configured origin. Don’t configure production credentials on unrelated preview origins.
 2. **Gmail:** Enable the Gmail API and register a web OAuth client. Set `XYVORA_GMAIL_CLIENT_ID` and `XYVORA_GMAIL_CLIENT_SECRET`; leave `XYVORA_GMAIL_PLUGIN_ENABLED=0` until approved for launch. The app asks for the restricted [`gmail.metadata` scope](https://developers.google.com/workspace/gmail/api/auth/scopes); use configured test users until the consent screen, required verification, and applicable security requirements are completed.
-3. **Vercel:** Register a [Sign in with Vercel app](https://vercel.com/docs/sign-in-with-vercel) configured for `openid` and `profile`, with a client secret. Set `XYVORA_VERCEL_CLIENT_ID` and `XYVORA_VERCEL_CLIENT_SECRET`; leave `XYVORA_VERCEL_PLUGIN_ENABLED=0` until approved for launch. If your app has access to [resource permissions](https://vercel.com/docs/sign-in-with-vercel/scopes-and-permissions), grant only **read** access to Projects for project listing. Profile sign-in alone does not authorize the Projects API.
+3. **Vercel:** Register a [Sign in with Vercel app](https://vercel.com/docs/sign-in-with-vercel) configured for `openid` and `profile`, with `client_secret_post` for the token exchange. Set `XYVORA_VERCEL_CLIENT_ID` and `XYVORA_VERCEL_CLIENT_SECRET`; leave `XYVORA_VERCEL_PLUGIN_ENABLED=0` until approved for launch. If your app has access to [resource permissions](https://vercel.com/docs/sign-in-with-vercel/scopes-and-permissions), grant only **read** access to Projects for project listing. Profile sign-in alone does not authorize the Projects API.
 4. **Hosted images:** Set `XYVORA_IMAGE_API_KEY` to a dedicated OpenAI project key with Images permission and `XYVORA_IMAGE_ACCESS_CODE` to a separate random code (24–180 characters). For image analysis, also set `XYVORA_ENABLE_VISION=1` and allow the Responses endpoint. Generation uses `gpt-image-1`; analysis uses `gpt-4.1-mini`. Set provider usage limits and monitoring before enabling paid tools. Only approved image inputs are sent, with no chat history or saved memory. The local rate limiter is **per instance**, not a shared spend cap. Don’t publish the access code or share any setup secrets in chat.
 
 Set values as sensitive server environment variables in Vercel and redeploy. Do not use a `VITE_` prefix. The service stays disabled for a provider until it is configured for the current origin. Plugin OAuth uses PKCE and state; plugin access tokens are encrypted/authenticated in host-only, HttpOnly, Secure cookies for at most an hour. No refresh tokens are kept. Disconnect clears the browser session and attempts provider revocation; permanent grants can also be removed in the provider’s account settings.
@@ -80,7 +84,7 @@ npm ci --ignore-scripts
 npm run dev
 ```
 
-The local preview uses labeled sample replies. The built-in tools, clock, script sandbox, on-device guest memory, text attachments, and local graphics work there. Use `XYVORA_LOCAL_PLATFORM=1 npm run dev` to test password signup/reset, chat/settings/memory sync, task lifecycle, and actual local analytics using an embedded database in `.cache/xyvora-platform`. Local signup/recovery links are written to `.cache/xyvora-platform-mail`, not sent to an email provider. This mode is only for local or disposable Arena previews; use test credentials. It does not prove cloud persistence or live OAuth. Hosted provider actions need an exact HTTPS origin and provider setup. Set `XYVORA_SERVER_MODELS=1` in `.env.local` for live inference and Web search. This needs a supported `node-llama-cpp` CPU binding and access to the model/search hosts. Run `npm run build:models` to stage the verified weights, or let the first local live request download them.
+The local preview uses labeled sample replies. Built-in tools, the clock, on-device guest memory, and file previews work there without enabling plugins. Use `XYVORA_LOCAL_PLATFORM=1 npm run dev` to test password signup/reset, chat/settings/memory sync, task lifecycle, and actual local analytics using an embedded database in `.cache/xyvora-platform`. Local signup/recovery emails are written to `.cache/xyvora-platform-mail`, not sent to a provider. Set `XYVORA_MAIL_PROVIDER=bird` too to test the six-digit code flow with the mail catcher. This mode is only for local or disposable Arena previews; use test credentials. It does not prove cloud persistence or live OAuth. Hosted provider actions need an exact HTTPS origin and provider setup. Set `XYVORA_SERVER_MODELS=1` in `.env.local` for live inference and Web search. This needs a supported `node-llama-cpp` CPU binding and access to the model/search hosts. Run `npm run build:models` to stage the verified weights, or let the first local live request download them.
 
 ## Deploy to Vercel
 
@@ -88,7 +92,7 @@ Use **xyvora-ai** with **xyvora.net** as its production domain. `vercel.json` co
 
 - The backend uses a compact Q4_0 GGUF of Apache-2.0 [Qwen 2.5 0.5B Instruct](https://huggingface.co/bartowski/Qwen2.5-0.5B-Instruct-GGUF), pinned to a revision and checksum. No weights are sent to browsers or checked into Git. The function maps its verified weights and reuses only the fixed system-prompt prefix between requests.
 - The weights exceed the standard bundle limit; use [Large Functions](https://vercel.com/docs/functions/limitations#large-functions) with Fluid compute and Active CPU. Older projects may need `VERCEL_SUPPORT_LARGE_FUNCTIONS=1`. `npm run build` needs no weight download; `npm run build:models` stages weights separately.
-- Markdown renders without a raw-text fallback; plugins, the PDF parser, and the script worker load on demand. Its one WASM file is the local JavaScript sandbox, **not** a model or inference runtime. Production has a same-origin Content Security Policy.
+- Markdown renders without a raw-text fallback, and the PDF parser loads on demand. No plugin or model resources run in the browser with plugins paused. Production has a same-origin Content Security Policy.
 
 ## Privacy and API
 
@@ -102,7 +106,7 @@ Guest history stays in the browser; signed-in history syncs to the verified acco
 
 `GET /api/account` checks sign-in providers and the browser session, or handles the OAuth callback. `/api/account?section=memory`, `?section=history`, and `?section=settings` require a verified session and serve that account only. There is no guest cloud storage.
 
-`GET /api/workspace` reports connection and hosted image tool availability or completes an OAuth state/code callback. `POST /api/workspace` accepts only same-origin JSON with `approved: true`; separate checks enforce the request registry, account session, provider configuration, and size and rate limits. `POST /api/workspace?input=image` is the bounded upload route for approved vision requests. Plugins cannot send arbitrary API calls, write to connected accounts, or access the native chat model.
+`/api/workspace` currently returns an uncached `404` before handling old plugin actions, uploads, or OAuth callbacks. Sign-in uses `/api/account` and is not affected.
 
 ## Checks
 
@@ -115,7 +119,7 @@ npm run check:site -- https://xyvora.net
 node --experimental-strip-types scripts/smoke-chat.mjs https://xyvora.net
 ```
 
-After staging the weights, `VERCEL=1 node --experimental-strip-types scripts/check-bundle.mjs` checks the actual bundled handlers, native modes, tools, and cancellation. `--search` tests the real search indexes and `--plugins` checks approved live GitHub and npm reads, including a repository directory and file. Account, analytics, and task SQL tests use an embedded PostgreSQL-compatible store. OAuth, model worker, and hosted image tests use fixture responses. Actual consent, cloud memory, and paid image generation/analysis must be checked with your configured projects. There are no account credentials in fixtures.
+After staging the weights, `VERCEL=1 node --experimental-strip-types scripts/check-bundle.mjs` checks the actual bundled handlers, native modes, tools, and cancellation. `--search` tests the real search indexes. The backend verifies that the plugin route is closed while paused; `--plugins` is only for approved live GitHub and npm reads in a future plugin-enabled build. Account, analytics, and task SQL tests use an embedded PostgreSQL-compatible store. OAuth, model worker, and hosted image tests use fixture responses. Actual consent, cloud memory, and paid image generation/analysis must be checked with your configured projects. There are no account credentials in fixtures.
 
 Run `VERCEL=1 node --experimental-strip-types scripts/bench-instant.mjs --bundle` in a fresh process with staged weights, or pass an HTTPS origin instead of `--bundle` to measure across HTTP. It alternates Normal and Instant for the same short question, with and without older chat history, and reports first text and completion separately. Run the live benchmark separately from the smoke to stay within the chat rate limit.
 

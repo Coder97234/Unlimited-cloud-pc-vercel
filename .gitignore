@@ -11,3 +11,6 @@ build/
 
 # Embedded development database
 .cache/
+
+# Generated static staging handoff
+/staging/zapier/xyvora-connect-staging.zip

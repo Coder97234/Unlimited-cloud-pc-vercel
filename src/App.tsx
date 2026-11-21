@@ -13,12 +13,12 @@ import type { Theme, WorkspacePreferences } from '../shared/preferences.ts';
 import { allowsSearchToggle, chatSearchQuery, MAX_SEARCH_QUERY } from '../shared/search.ts';
 import { DEFAULT_MODE } from '../shared/modes.ts';
 import type { ReplyMode } from '../shared/modes.ts';
-import { isProvider, PLUGINS, workspaceIntent } from '../shared/workspace-tools.ts';
+import { isProvider, PLUGINS, WORKSPACE_PLUGINS_ENABLED, workspaceIntent } from '../shared/workspace-tools.ts';
 import type { RepoWorkbenchDraft } from '../shared/repositories.ts';
 import type { PluginIntent } from '../shared/workspace-tools.ts';
 import { brandAnswer } from '../shared/branding.ts';
 import { fencedText } from '../shared/text-tools.ts';
-import { runInstantSkill } from '../shared/skills.ts';
+import { runInstantSkill, teamAnswerSkill } from '../shared/skills.ts';
 import { AccountDialog, MemoryDialog, PasswordLinkDialog } from './components/AccountDialogs.tsx';
 import { TasksDialog } from './components/TasksDialog.tsx';
 import { VisionDialog } from './components/VisionDialog.tsx';
@@ -48,10 +48,11 @@ import { useChatHistory } from './lib/use-history.ts';
 type ForkKind = 'edit' | 'reply';
 type Modal = { kind: 'delete'; thread: Thread } | { kind: 'plugins'; intent?: PluginIntent }
   | { kind: 'fork'; turnId: string; fork: ForkKind } | { kind: 'memory'; initial?: string }
-  | { kind: 'search' | 'shortcuts' | 'settings' | 'about' | 'mode' | 'context' | 'account' | 'vision' | 'tasks' | 'sync-conflict' };
-const PluginsDialog = lazy(() => import('./components/PluginsDialog.tsx').then(({ PluginsDialog }) => ({ default: PluginsDialog })).catch(() => ({
+  | { kind: 'account'; view?: 'signup' }
+  | { kind: 'search' | 'shortcuts' | 'settings' | 'about' | 'mode' | 'context' | 'vision' | 'tasks' | 'sync-conflict' };
+const PluginsDialog = WORKSPACE_PLUGINS_ENABLED ? lazy(() => import('./components/PluginsDialog.tsx').then(({ PluginsDialog }) => ({ default: PluginsDialog })).catch(() => ({
   default: ({ onClose }: { onClose: () => void }) => <Dialog title="Plugins unavailable" onClose={onClose}><p>Couldn’t load the workspace. Check your connection and refresh to try again.</p></Dialog>,
-})));
+}))) : undefined;
 
 const emptyTurns: Turn[] = [];
 
@@ -162,7 +163,7 @@ function Workspace({ account, checking, chatStatus: { availability, canSearch },
     const url = new URL(window.location.href);
     const outcome = url.searchParams.get('account');
     const flag = url.searchParams.get('connection');
-    if (outcome || flag) {
+    if (url.searchParams.has('account') || url.searchParams.has('connection')) {
       url.searchParams.delete('account');
       url.searchParams.delete('connection');
       window.history.replaceState(null, '', url);
@@ -175,7 +176,7 @@ function Workspace({ account, checking, chatStatus: { availability, canSearch },
       setModal({ kind: 'account' });
       setToast('Couldn’t finish sign-in. Try the provider again.');
     }
-    if (!flag) return;
+    if (!WORKSPACE_PLUGINS_ENABLED || !flag) return;
     const [provider, result] = flag.split('-');
     if (!isProvider(provider) || (result !== 'connected' && result !== 'failed')) return;
     setModal({ kind: 'plugins', intent: { id: provider } });
@@ -270,7 +271,7 @@ function Workspace({ account, checking, chatStatus: { availability, canSearch },
         // provider sees the image before explicit review and approval.
         const [prepared, status] = await Promise.all([
           prepareVisionPhoto(images[0], controller.signal),
-          getWorkspace(AbortSignal.any([controller.signal, AbortSignal.timeout(4_000)])).catch(() => undefined),
+          WORKSPACE_PLUGINS_ENABLED ? getWorkspace(AbortSignal.any([controller.signal, AbortSignal.timeout(4_000)])).catch(() => undefined) : undefined,
         ]);
         controller.signal.throwIfAborted();
         setCanAnalyze(status?.hostedVision === true);
@@ -372,7 +373,10 @@ function Workspace({ account, checking, chatStatus: { availability, canSearch },
     if (matchMedia('(max-width: 760px)').matches) setMobileOpen((open) => !open);
     else setCollapsed((closed) => !closed);
   }
-  function openPlugins(intent?: PluginIntent) { setMobileOpen(false); setModal({ kind: 'plugins', intent }); }
+  function openPlugins(intent?: PluginIntent) {
+    if (!WORKSPACE_PLUGINS_ENABLED) return;
+    setMobileOpen(false); setModal({ kind: 'plugins', intent });
+  }
   function openAccount() { if (!checking) { setMobileOpen(false); setModal({ kind: 'account' }); } }
   function openMemory(initial?: string) { if (!checking) { setMobileOpen(false); setModal({ kind: 'memory', initial }); } }
   function pickPhoto() {
@@ -394,7 +398,7 @@ function Workspace({ account, checking, chatStatus: { availability, canSearch },
       if (modal || (accountLink && !checking)) return;
       if (command && key === 'k' && !event.shiftKey) {
         event.preventDefault(); setMobileOpen(false); setModal({ kind: 'search' });
-      } else if (command && key === '/' && !event.shiftKey) {
+      } else if (WORKSPACE_PLUGINS_ENABLED && command && key === '/' && !event.shiftKey) {
         event.preventDefault(); openPlugins();
       } else if (command && event.shiftKey && (key === 'n' || key === 'o')) {
         event.preventDefault(); setNew();
@@ -411,8 +415,9 @@ function Workspace({ account, checking, chatStatus: { availability, canSearch },
   async function run(retry?: Turn, accessCode?: string) {
     const prompt = retry?.prompt ?? draft.trim();
     if (checking || (!history.ready && !temporary) || controllerRef.current || fileJob.current || archived || !prompt || retry?.imageName) return;
-    const picture = retry ? undefined : photo;
-    if (picture && (!canAnalyze || prompt.length > MAX_VISION_QUESTION)) return;
+    const team = teamAnswerSkill(prompt);
+    const picture = retry || team ? undefined : photo;
+    if (picture && (!WORKSPACE_PLUGINS_ENABLED || !canAnalyze || prompt.length > MAX_VISION_QUESTION)) return;
     if (picture && !accessCode) { setModal({ kind: 'vision' }); return; }
     const remember = !picture && !retry ? /^\/remember(?:\s+([\s\S]*))?$/i.exec(prompt) : null;
     if (remember) {
@@ -423,7 +428,7 @@ function Workspace({ account, checking, chatStatus: { availability, canSearch },
     if (!temporary && (branchDraft || !active) && threads.length >= MAX_THREADS) {
       setToast('Export or delete a saved chat before starting another, or use Temporary chat.'); return;
     }
-    const external = picture ? undefined : workspaceIntent(prompt);
+    const external = WORKSPACE_PLUGINS_ENABLED && !picture && !team ? workspaceIntent(prompt) : undefined;
     if (external) {
       // This is a proposal, not a call. The draft and files stay in the composer.
       const file = files[0];
@@ -435,8 +440,8 @@ function Workspace({ account, checking, chatStatus: { availability, canSearch },
       return;
     }
     const attached = picture ? undefined : retry ? retry.attachment : combineFiles(files);
-    const searchQuery = picture ? undefined : chatSearchQuery(prompt, !retry && webSearch) ?? (allowsSearchToggle(prompt) ? retry?.searchQuery : undefined);
-    const skill = !picture && searchQuery === undefined ? runInstantSkill(prompt, attached?.text) : undefined;
+    const searchQuery = picture || team ? undefined : chatSearchQuery(prompt, !retry && webSearch) ?? (allowsSearchToggle(prompt) ? retry?.searchQuery : undefined);
+    const skill = team ?? (!picture && searchQuery === undefined ? runInstantSkill(prompt, attached?.text) : undefined);
     if (searchQuery !== undefined) {
       if (!canSearch) { setToast(`Web search needs the live chat on ${XYVORA_SITE}.`); return; }
       if (!searchQuery.trim() || searchQuery.length > MAX_SEARCH_QUERY) {
@@ -484,7 +489,7 @@ function Workspace({ account, checking, chatStatus: { availability, canSearch },
     let content = '';
     let frame = 0;
     try {
-      if (picture) {
+      if (WORKSPACE_PLUGINS_ENABLED && picture) {
         const image = await photoBase64(picture.blob, controller.signal);
         const result = await approveTool<{ text: string }>({ action: 'vision', image, prompt, accessCode }, controller.signal);
         controller.signal.throwIfAborted();
@@ -556,9 +561,10 @@ function Workspace({ account, checking, chatStatus: { availability, canSearch },
     <button type="button" className="mobile-overlay" onClick={() => setMobileOpen(false)} aria-label="Close sidebar"><span /></button>
     <Sidebar threads={threads} activeId={activeId} availability={availability} temporary={temporary} memoryOn={memory?.enabled === true} signedIn={!!accountId} onMemory={() => openMemory()} onNew={setNew}
       onTemporary={() => { if (temporary) { setMobileOpen(false); focusPrompt(); } else startChat(true); }}
-      onSearch={() => { setMobileOpen(false); setModal({ kind: 'search' }); }} onPlugins={() => openPlugins()} onWebSearch={() => pickPrompt('/search ', true)}
-      onRepo={() => openPlugins({ id: 'repo' })} onTasks={account.background ? () => { setMobileOpen(false); setModal({ kind: 'tasks' }); } : undefined}
-      onImage={() => openPlugins({ id: 'image' })} onSettings={() => { setMobileOpen(false); setModal({ kind: 'settings' }); }}
+      onSearch={() => { setMobileOpen(false); setModal({ kind: 'search' }); }} onWebSearch={() => pickPrompt('/search ', true)}
+      onPlugins={WORKSPACE_PLUGINS_ENABLED ? () => openPlugins() : undefined} onRepo={WORKSPACE_PLUGINS_ENABLED ? () => openPlugins({ id: 'repo' }) : undefined}
+      onImage={WORKSPACE_PLUGINS_ENABLED ? () => openPlugins({ id: 'image' }) : undefined} onTasks={account.background ? () => { setMobileOpen(false); setModal({ kind: 'tasks' }); } : undefined}
+      onSettings={() => { setMobileOpen(false); setModal({ kind: 'settings' }); }}
       syncLabel={history.loading ? 'Loading saved chats…' : history.unsynced ? 'Sync pending' : history.ready ? 'Cloud history' : 'History unavailable'} onCollapse={toggleSidebar} onThread={showThread} onDelete={(thread) => setModal({ kind: 'delete', thread })}
       onAbout={() => { setMobileOpen(false); setModal({ kind: 'about' }); }} />
     <main className={`workspace${turns.length ? ' has-chat' : ''}`} id="main-workspace">
@@ -569,7 +575,7 @@ function Workspace({ account, checking, chatStatus: { availability, canSearch },
           <strong>{archived ? 'Archive' : temporary ? 'Temporary' : branchDraft ? 'Branch' : 'Chat'}</strong>
         </div>
         <div className="topbar-actions">
-          <button type="button" className="plugins-button" aria-label="Plugins" aria-haspopup="dialog" aria-keyshortcuts="Control+/ Meta+/" onClick={() => openPlugins()}><Blocks size={16} /><span>Plugins</span></button>
+          {WORKSPACE_PLUGINS_ENABLED && <button type="button" className="plugins-button" aria-label="Plugins" aria-haspopup="dialog" aria-keyshortcuts="Control+/ Meta+/" onClick={() => openPlugins()}><Blocks size={16} /><span>Plugins</span></button>}
           {!archived && <button type="button" className={`context-button${isolated ? ' context-isolated' : ''}`} aria-label="Message context" title={isolated ? 'Message context: This message only' : 'Message context: Recent chat'} aria-haspopup="dialog" disabled={busy} onClick={() => setModal({ kind: 'context' })}><ListTree size={16} /><span>Context</span></button>}
           {active && !temporary && !branchDraft && turns.length > 0 && <button type="button" className="icon-button export-button" aria-label="Download conversation as Markdown" title="Download conversation as Markdown" onClick={() => downloadConversation(active)}><Download size={17} /></button>}
           <button type="button" className="identity-button" aria-label={accountId ? 'Your account' : canSignIn || checking ? 'Sign in' : 'Guest workspace'} aria-haspopup="dialog" title={accountId ? 'Your account' : canSignIn ? 'Sign in or create an account' : 'Guest workspace'}
@@ -596,13 +602,16 @@ function Workspace({ account, checking, chatStatus: { availability, canSearch },
       </> : <div className="welcome-scroll">
         <div className="welcome">
           <div className="welcome-heading">
-            <BrandLockup dark={theme === 'dark'} />
+            <BrandLockup />
             <span className="workspace-kicker"><Sparkles size={13} strokeWidth={2.1} /> {XYVORA_SLOGAN}</span>
             <h1>What’s on your mind<span>?</span></h1><p>Ask a question, bring a file, or make something with <strong>{XYVORA_NAME}</strong>.</p>
           </div>
           {composer}
-          <Suggestions onPick={pickPrompt} onImage={() => openPlugins({ id: 'image' })} />
+          <Suggestions onPick={pickPrompt} onImage={WORKSPACE_PLUGINS_ENABLED ? () => openPlugins({ id: 'image' }) : undefined} />
           <p className="workspace-tip">Try <code>/tools</code> for built-in tools, or ask “What time is it in Tokyo?”</p>
+          {!accountId && canSignIn && <p className="welcome-account">Pick up where you left off on any device.
+            <button type="button" className="text-button" onClick={() => setModal({ kind: 'account', view: 'signup' })}>Create an account <span aria-hidden="true">↗</span></button>
+          </p>}
         </div>
       </div>}
       <SiteFooter />
@@ -613,18 +622,18 @@ function Workspace({ account, checking, chatStatus: { availability, canSearch },
       onClear={() => { setNew(); setThreads([]); setToast('Chat history cleared.'); }} />}
     {modal?.kind === 'shortcuts' && <ShortcutsDialog onClose={closeModal} />}
     {modal?.kind === 'tasks' && <TasksDialog accountId={accountId} available={account.background} onSignIn={openAccount} onClose={closeModal} />}
-    {modal?.kind === 'account' && <AccountDialog account={account} error={accountError} unsynced={history.unsynced} openSignIn={canSignIn} onRetry={onCheckAccount} onClose={closeModal} onMemory={() => openMemory()} />}
+    {modal?.kind === 'account' && <AccountDialog account={account} error={accountError} unsynced={history.unsynced} initialView={modal.view} onRetry={onCheckAccount} onClose={closeModal} onMemory={() => openMemory()} />}
     {accountLink && !checking && <PasswordLinkDialog key={accountLink.token} link={accountLink} onClose={dismissLink} />}
     {modal?.kind === 'memory' && <MemoryDialog key={memory ? 'ready' : 'loading'} profile={memory} accountId={accountId}
       initial={modal.initial} error={memoryError} onReload={() => { setMemoryError(''); setMemoryRequest((value) => value + 1); }}
       onSave={(saved) => { setMemory(saved); if (/^\/remember(?:\s|$)/i.test(draft.trim())) setDraft(''); closeModal(); setToast('Memory saved.'); }} onClose={closeModal} />}
-    {modal?.kind === 'vision' && photo && <VisionDialog photo={photo} question={draft.trim()} onClose={closeModal}
+    {WORKSPACE_PLUGINS_ENABLED && modal?.kind === 'vision' && photo && <VisionDialog photo={photo} question={draft.trim()} onClose={closeModal}
       onApprove={(code) => { closeModal(); void run(undefined, code); }} />}
     {modal?.kind === 'context' && <ContextDialog isolated={isolated} onPick={(value) => { setIsolated(value); closeModal(); focusPrompt(); }} onClose={closeModal} />}
     {modal?.kind === 'fork' && forkTurn && <BranchDialog key={forkTurn.id} turn={forkTurn} editing={modal.fork === 'edit'} hasDraft={!!draft.trim() || !!files.length || !!photo}
       onStart={(carry) => startFork(forkTurn, modal.fork, carry)} onClose={closeModal} />}
     {modal?.kind === 'mode' && <ModeDialog mode={mode} onPick={(value) => { setMode(value); closeModal(); focusPrompt(); }} onClose={closeModal} />}
-    {modal?.kind === 'plugins' && <Suspense fallback={<Dialog title="Plugins" subtitle="Opening the workspace…" onClose={closeModal}><span role="status">Loading…</span></Dialog>}>
+    {PluginsDialog && modal?.kind === 'plugins' && <Suspense fallback={<Dialog title="Plugins" subtitle="Opening the workspace…" onClose={closeModal}><span role="status">Loading…</span></Dialog>}>
       <PluginsDialog key={modal.intent?.id ?? 'list'} intent={modal.intent} textInput={combineFiles(files)?.text} onInsert={insertToolOutput} onChoosePhoto={pickPhoto} repoDraft={repositoryDraft.current} onRepoFile={attachRepoFile} onClose={closeModal} />
     </Suspense>}
     {modal?.kind === 'about' && <AboutDialog onClose={closeModal} />}

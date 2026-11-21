@@ -3,13 +3,13 @@ import { useEffect, useRef, useState } from 'react';
 import { IMAGE_SIZES } from '../../shared/media.ts';
 import type { RepoWorkbenchDraft } from '../../shared/repositories.ts';
 import type { TextAttachment } from '../../shared/models.ts';
-import { PLUGINS, PUBLIC_API_EXAMPLE, publicApiTarget } from '../../shared/workspace-tools.ts';
+import { PLUGINS, PUBLIC_API_EXAMPLE, publicApiTarget, VERCEL_TEAM_SLUG, WORKSPACE_AUTH_PATHS } from '../../shared/workspace-tools.ts';
 import type { ConnectionStatus, PluginId, PluginIntent, Provider, WorkspaceStatus } from '../../shared/workspace-tools.ts';
 import { ART_STYLES, renderLocalArt } from '../lib/local-image.ts';
 import type { ArtStyle } from '../lib/local-image.ts';
 import { runScript } from '../lib/run-script.ts';
 import type { ScriptOutput } from '../lib/sandbox-engine.ts';
-import { approveTool, getWorkspace } from '../lib/workspace-api.ts';
+import { approveTool, getWorkspace, WorkspaceError } from '../lib/workspace-api.ts';
 import { Dialog } from './Dialog.tsx';
 import { RepositoryWorkbench } from './RepositoryWorkbench.tsx';
 
@@ -169,11 +169,19 @@ function AccountPanel({ provider, status, change }: { provider: Provider; status
   const task = useOperation();
   const [output, setOutput] = useState('');
   const [notice, setNotice] = useState('');
+  const [team, setTeam] = useState('');
+  const slug = team.trim();
+  const validTeam = !slug || VERCEL_TEAM_SLUG.test(slug);
   const name = PLUGINS[provider].name;
   const invoke = (operation: string) => void task.begin(async (signal) => {
-    setOutput('');
-    const data = await approveTool<unknown>({ action: 'account', provider, operation }, signal);
-    signal.throwIfAborted(); setOutput(JSON.stringify(data, null, 2));
+    setOutput(''); setNotice('');
+    try {
+      const data = await approveTool<unknown>({ action: 'account', provider, operation, ...(operation === 'projects' && slug && { teamSlug: slug }) }, signal);
+      signal.throwIfAborted(); setOutput(JSON.stringify(data, null, 2));
+    } catch (error) {
+      if (!signal.aborted && error instanceof WorkspaceError && error.status === 401) change('disconnected');
+      throw error;
+    }
   });
   return <div className="plugin-fields">
     <p className="plugin-notice"><ShieldCheck size={17} /> {PLUGINS[provider].summary} Results aren’t sent to the assistant or saved in chat. Connections expire within an hour.</p>
@@ -182,14 +190,17 @@ function AccountPanel({ provider, status, change }: { provider: Provider; status
     {status === 'disconnected' && <><p className="form-hint">You’ll leave Xyvora to approve the connection. Finish any unsent draft first.</p><div className="plugin-run-row"><button className="plugin-primary" type="button" disabled={task.busy} onClick={() => void task.begin(async (signal) => {
       const { url } = await approveTool<{ url: string }>({ action: 'connect', provider }, signal);
       const auth = new URL(url);
-      if (auth.origin !== (provider === 'gmail' ? 'https://accounts.google.com' : 'https://vercel.com')) throw new Error('The provider did not return a valid authorization page.');
+      if (auth.origin + auth.pathname !== WORKSPACE_AUTH_PATHS[provider] || auth.username || auth.password || auth.hash) throw new Error('The provider did not return a valid authorization page.');
       signal.throwIfAborted(); window.location.assign(auth.href);
     })}><Link2 size={17} /> {task.busy ? 'Opening provider…' : `Connect ${name}`}</button></div></>}
     {status === 'connected' && <>
       {provider === 'vercel' && <p className="form-hint">Project listing also needs read-only Projects permission. Profile access works without that grant.</p>}
       <RunButton task={task} label={provider === 'gmail' ? 'Approve & read inbox headers' : 'Approve & read profile'} onRun={() => invoke(provider === 'gmail' ? 'inbox' : 'profile')} />
+      {provider === 'vercel' && <label className="field-label">Team slug (optional)<input className="plugin-input" value={team}
+        aria-describedby="vercel-team-hint" aria-invalid={!validTeam} onChange={({ target }) => setTeam(target.value)} maxLength={62} spellCheck={false} autoCapitalize="none" disabled={task.busy} /></label>}
+      {provider === 'vercel' && <p className="form-hint" id="vercel-team-hint">{validTeam ? 'Leave blank for your default scope, or use the team slug from its Vercel dashboard URL.' : 'Use the team’s slug, not its full URL.'}</p>}
       <div className="plugin-run-row">
-        {provider === 'vercel' && <button className="secondary-button" type="button" disabled={task.busy} onClick={() => invoke('projects')}>Approve & read projects</button>}
+        {provider === 'vercel' && <button className="secondary-button" type="button" disabled={task.busy || !validTeam} onClick={() => invoke('projects')}>Approve & read projects</button>}
         <button className="danger-button" type="button" disabled={task.busy} onClick={() => void task.begin(async (signal) => {
           const { revoked } = await approveTool<{ revoked: boolean }>({ action: 'disconnect', provider }, signal);
           signal.throwIfAborted(); setOutput(''); change('disconnected');
@@ -210,16 +221,18 @@ export function PluginsDialog({ intent, textInput, onInsert, onChoosePhoto, repo
   const [error, setError] = useState('');
   const enabled = (key: PluginId) => key !== 'gmail' && key !== 'vercel' || ['connected', 'disconnected'].includes(status?.connections[key] ?? '');
   const id = selected && enabled(selected) ? selected : undefined;
+  const [check, setCheck] = useState(0);
   useEffect(() => {
     const controller = new AbortController();
     getWorkspace(controller.signal).then((value) => { if (!controller.signal.aborted) setStatus(value); }).catch((error: Error) => {
       if (!controller.signal.aborted) setError(error.message);
     });
     return () => controller.abort();
-  }, []);
+  }, [check]);
   return <Dialog title={id ? PLUGINS[id].name : 'Plugins'} subtitle={id ? PLUGINS[id].summary : 'Work with files, create graphics, run a script, or explore public APIs.'} className="plugins-dialog" onClose={onClose}>
     {id && <button type="button" className="plugin-back" onClick={() => setId(undefined)}><ArrowLeft size={16} /> All plugins</button>}
-    {error && id !== 'script' && id !== 'image' && <ErrorNotice message={error} />}
+    {error && (!id || id === 'image') && <div className="plugin-status-error"><p className="form-hint" role="status">Couldn’t check connected tools. Local and public tools are still available.</p>
+      <button type="button" className="secondary-button" onClick={() => { setError(''); setCheck((value) => value + 1); }}>Retry plugin status</button></div>}
     {!id && <>
       <p className="plugin-notice"><ShieldCheck size={17} /> Built-in chat tools run on request. Plugins review scripts and external calls with you first.</p>
       <div className="plugin-grid">

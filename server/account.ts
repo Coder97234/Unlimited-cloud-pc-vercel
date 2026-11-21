@@ -4,7 +4,7 @@ import type { AccountProvider, AccountStatus, PublicAccount } from '../shared/ac
 import { emptyMemory, parseMemory } from '../shared/memory.ts';
 import { XYVORA_URL } from '../shared/site.ts';
 import { MAX_CLOUD_HISTORY_BYTES } from '../shared/history.ts';
-import { accountMailer, hashToken, newToken, passwordLogin, redeemEmailLink, sendEmailLink, tokenPattern } from './account-email.ts';
+import { accountMailer, hashToken, newToken, passwordLogin, redeemEmailChallenge, sendEmailChallenge, tokenPattern } from './account-email.ts';
 import type { SendAccountMail } from './account-email.ts';
 import { changeHistory, changePreferences, readHistory, readPreferences } from './account-storage.ts';
 import { workerIsOnline } from './worker-health.ts';
@@ -18,7 +18,7 @@ const routes = {
   github: { token: 'https://github.com/login/oauth/access_token', profile: 'https://api.github.com/user', scope: 'read:user', pkce: true },
   discord: { token: 'https://discord.com/api/oauth2/token', profile: 'https://discord.com/api/users/@me', scope: 'identify', pkce: false },
 } as const;
-export type AccountConfig = { origin: string; db: PlatformDb; clients: Partial<Record<AccountProvider, { id: string; secret: string }>>; passwords: boolean; background: boolean; mail?: SendAccountMail; authSecret: string };
+export type AccountConfig = { origin: string; db: PlatformDb; clients: Partial<Record<AccountProvider, { id: string; secret: string }>>; passwords: boolean; background: boolean; mail?: SendAccountMail; emailVerification: 'link' | 'code'; authSecret: string };
 const day = 86_400_000;
 export const digest = hashToken;
 
@@ -36,7 +36,8 @@ export function accountConfig(env: Env, db = productionDb(env), previewOrigin?: 
     if (id && secret && origin.startsWith('https://')) clients[provider] = { id, secret };
   }
   const authSecret = env.XYVORA_AUTH_SECRET?.trim() ?? '';
-  return { origin, db, clients, mail, authSecret, passwords: env.XYVORA_ENABLE_PASSWORDS === '1' && !!mail && authSecret.length >= 32, background: env.XYVORA_ENABLE_BACKGROUND === '1' };
+  const emailVerification = env.XYVORA_MAIL_PROVIDER?.trim() === 'bird' ? 'code' : 'link';
+  return { origin, db, clients, mail, emailVerification, authSecret, passwords: env.XYVORA_ENABLE_PASSWORDS === '1' && !!mail && authSecret.length >= 32, background: env.XYVORA_ENABLE_BACKGROUND === '1' };
 }
 
 const cookieName = (config: AccountConfig, name: 'session' | 'oauth') => `${config.origin.startsWith('https:') ? '__Host-' : ''}xyvora-${name}`;
@@ -165,11 +166,11 @@ export async function handleAccount(request: Request, config: AccountConfig | un
           return json({ signedIn: true });
         }
         if (action === 'request-signup' || action === 'request-reset') {
-          await sendEmailLink(config.db, config.origin, config.mail!, config.authSecret, request, action === 'request-signup' ? 'signup' : 'reset', input.email, limit, schedule);
+          await sendEmailChallenge(config, config.mail!, request, action === 'request-signup' ? 'signup' : 'reset', input.email, { limit, schedule });
           return json({ accepted: true }, 202);
         }
         if (action === 'verify-email' || action === 'reset-password') {
-          const account = await redeemEmailLink(config.db, action === 'verify-email' ? 'signup' : 'reset', input);
+          const account = await redeemEmailChallenge(config, request, action === 'verify-email' ? 'signup' : 'reset', input, limit);
           if (account) {
             await createSession(headers, request, config, account, account.credential_version);
             return json({ signedIn: true });
@@ -187,7 +188,9 @@ export async function handleAccount(request: Request, config: AccountConfig | un
       // launch migration has been installed.
       if (!user && (providers.length || config.passwords)) await config.db.query('select 1 from xyvora_cloud_history limit 0');
       const background = config.background && !!(user || providers.length || config.passwords) && await workerIsOnline(config.db).catch(() => false);
-      return json({ providers, passwords: config.passwords, background, user, ...(user && { settings: await readPreferences(config.db, user.id) }) } satisfies AccountStatus);
+      return json({ providers, passwords: config.passwords, background, user,
+        ...(config.passwords && config.emailVerification === 'code' && { emailVerification: 'code' as const }),
+        ...(user && { settings: await readPreferences(config.db, user.id) }) } satisfies AccountStatus);
     }
     if (input?.action === 'sign-out' && !section) {
       if (user && request.headers.get('x-xyvora-account') !== user.id) throw new ToolError('Your account changed. Refresh and try again.', 409);
