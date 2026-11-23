@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import middleware from '../middleware.ts';
+import middleware from '../server/vercel-middleware.ts';
 import { updateKeyConfigured, updateLocked } from '../server/update-lock.ts';
 
 const config = JSON.parse(await readFile(new URL('../vercel.json', import.meta.url), 'utf8'));
-assert.equal(config.proxy?.entrypoint, 'middleware.ts');
+assert.equal(config.proxy?.entrypoint, 'middleware.js');
 assert.equal(config.proxy.matcher, undefined, 'Do not exclude assets or API routes from the gate.');
 if (updateLocked(process.env, true)) {
   if (!updateKeyConfigured(process.env)) throw new Error('Configure a valid sensitive XYVORA_UPDATE_KEY before releasing the locked site.');

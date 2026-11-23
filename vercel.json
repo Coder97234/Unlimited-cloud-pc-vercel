@@ -3,7 +3,7 @@
   "cleanUrls": true,
   "trailingSlash": false,
   "framework": "vite",
-  "proxy": { "entrypoint": "middleware.ts" },
+  "proxy": { "entrypoint": "middleware.js" },
   "installCommand": "npm ci --ignore-scripts --no-audit --no-fund && node scripts/vercel-cpu.mjs",
   "buildCommand": "node --experimental-strip-types scripts/check-update-release.mjs && npm run build && npm run check:site && npm run build:models",
   "outputDirectory": "dist",

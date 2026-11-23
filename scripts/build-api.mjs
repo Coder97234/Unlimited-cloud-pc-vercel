@@ -1,6 +1,6 @@
 import { rolldown } from 'rolldown';
 
-for (const route of ['chat', 'workspace', 'account', 'analytics']) {
+for (const route of ['chat', 'workspace', 'account', 'analytics', 'middleware']) {
   const bundle = await rolldown({ input: `server/vercel-${route}.ts`, platform: 'node', external: ['node-llama-cpp', 'pg', '@vercel/functions'] });
   try { await bundle.write({ file: `build/${route}.mjs`, format: 'esm' }); }
   finally { await bundle.close(); }
