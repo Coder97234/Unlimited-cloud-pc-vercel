@@ -1,16 +1,16 @@
 import {
-  Blocks, Brain, Clock3, Columns2, FolderOpen, GitBranch, Globe, ImagePlus, ListTodo, MessageSquare, PanelLeftClose, Plus, Search, Settings2, Shield, Trash2, UserRound,
+  Blocks, Brain, Clock3, Columns2, FolderOpen, GitBranch, Globe, ImagePlus, ListTodo, MessageSquare, PanelLeftClose, Pin, Plus, Search, Settings2, Star, Shield, Trash2, UserRound,
 } from 'lucide-react';
 import { XYVORA_NAME } from '../../shared/models.ts';
 import type { Availability } from '../../shared/models.ts';
 import type { Thread } from '../lib/history.ts';
 import { Mascot } from './Brand.tsx';
 
-export function Sidebar({ threads, activeId, availability, temporary, memoryOn, signedIn, syncLabel, onMemory, onNew, onTemporary, onSearch, onPlugins, onRepo, onTasks, onWebSearch, onImage, onSettings, onCollapse, onThread, onDelete, onAbout }: {
+export function Sidebar({ threads, activeId, availability, temporary, memoryOn, signedIn, syncLabel, onMemory, onNew, onTemporary, onSearch, onProjects, projectName, onPlugins, onRepo, onTasks, onWebSearch, onImage, onSettings, onCollapse, onThread, onDelete, onMore, paging, pageError, onAbout }: {
   threads: Thread[]; activeId: string | null; availability: Availability | 'loading';
-  temporary: boolean; memoryOn: boolean; signedIn: boolean; syncLabel: string; onMemory: () => void; onNew: () => void; onTemporary: () => void; onSearch: () => void; onPlugins?: () => void; onRepo?: () => void; onTasks?: () => void; onWebSearch: () => void; onImage?: () => void;
+  temporary: boolean; memoryOn: boolean; signedIn: boolean; syncLabel: string; onMemory: () => void; onNew: () => void; onTemporary: () => void; onSearch: () => void; onProjects?: () => void; projectName?: string; onPlugins?: () => void; onRepo?: () => void; onTasks?: () => void; onWebSearch: () => void; onImage?: () => void;
   onSettings: () => void; onCollapse: () => void; onThread: (thread: Thread) => void;
-  onDelete: (thread: Thread) => void; onAbout: () => void;
+  onDelete: (thread: Thread) => void; onMore?: () => void; paging: boolean; pageError: string; onAbout: () => void;
 }) {
   const mac = navigator.platform.includes('Mac');
   return <aside className="sidebar" id="workspace-sidebar" aria-label="Workspace sidebar">
@@ -27,6 +27,7 @@ export function Sidebar({ threads, activeId, availability, temporary, memoryOn, 
       <nav className="workspace-nav" aria-label="Workspace">
         <div className="sidebar-label">WORKSPACE</div>
         {onPlugins && <button type="button" className="nav-button" onClick={onPlugins}><Blocks size={17} /><span>Plugins</span></button>}
+        {onProjects && <button type="button" className="nav-button" onClick={onProjects}><FolderOpen size={17} /><span>Projects</span></button>}
         <button type="button" className="nav-button" onClick={onWebSearch}><Globe size={17} /><span>Web search</span></button>
         {onRepo && <button type="button" className="nav-button" onClick={onRepo}><GitBranch size={17} /><span>GitHub projects</span></button>}
         {onTasks && <button type="button" className="nav-button" onClick={onTasks}><ListTodo size={17} /><span>Background tasks</span></button>}
@@ -34,17 +35,19 @@ export function Sidebar({ threads, activeId, availability, temporary, memoryOn, 
         <button type="button" className="nav-button" onClick={onMemory}><Brain size={17} /><span>Memory</span>{memoryOn && <small className="memory-indicator">On</small>}</button>
       </nav>
       <section className="history-section" aria-label="Recent chats">
-        <div className="sidebar-label history-title">RECENT CHATS <Clock3 size={13} /></div>
+        <div className="sidebar-label history-title">{projectName ? 'PROJECT CHATS' : 'RECENT CHATS'} <Clock3 size={13} /></div>
         {threads.length === 0
           ? <div className="history-empty"><FolderOpen size={17} /><span>Your chats will appear here.</span></div>
           : <ul className="history-list">
             {threads.map((thread) => <li key={thread.id} className={`history-row${thread.id === activeId ? ' active' : ''}`}>
               <button type="button" className="history-entry" title={thread.title} onClick={() => onThread(thread)} aria-current={thread.id === activeId ? 'true' : undefined}>
-                {thread.mode === 'compare' ? <Columns2 size={15} /> : <MessageSquare size={15} />}<span>{thread.title}</span>
+                {thread.pinned ? <Pin size={15} /> : thread.mode === 'compare' ? <Columns2 size={15} /> : <MessageSquare size={15} />}<span>{thread.title}</span>{thread.favorite && <Star size={12} className="history-star" aria-label="Favorite" />}
               </button>
               <button type="button" className="bare-icon history-delete" aria-label={`Delete ${thread.title}`} title="Delete chat" onClick={() => onDelete(thread)}><Trash2 size={14} /></button>
             </li>)}
           </ul>}
+        {onMore && <button type="button" className="nav-button history-more" disabled={paging} onClick={onMore}>{paging ? 'Loading…' : 'Load more chats'}</button>}
+        {pageError && <p className="form-hint" role="status">{pageError}</p>}
       </section>
     </div>
     <div className="sidebar-bottom">

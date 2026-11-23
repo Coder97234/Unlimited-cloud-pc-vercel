@@ -1,3 +1,4 @@
+import { PUBLIC_CREDENTIALS } from './early-access.ts';
 const key = 'xyvora.analytics.choice.v1';
 const idKey = 'xyvora.analytics.browser.v1';
 const privacySignal = () => (navigator as Navigator & { globalPrivacyControl?: boolean }).globalPrivacyControl === true;
@@ -9,7 +10,7 @@ let heartbeat: ReturnType<typeof setInterval> | undefined;
 let lastAction = Date.now();
 
 function analyticsPost(body: object) {
-  return fetch('/api/analytics', { method: 'POST', credentials: 'omit', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), cache: 'no-store', signal: AbortSignal.timeout(8_000) });
+  return fetch('/api/analytics', { method: 'POST', credentials: PUBLIC_CREDENTIALS, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), cache: 'no-store', signal: AbortSignal.timeout(8_000) });
 }
 export async function trackVisit() {
   if (!analyticsEnabled() || document.hidden || Date.now() - lastAction > 90_000 || pinging) return;

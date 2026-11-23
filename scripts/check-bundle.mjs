@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { randomBytes } from 'node:crypto';
+import { checkUpdateLock, makeUpdateKey } from '../server/update-lock.ts';
 import { readdir } from 'node:fs/promises';
 import api from '../api/chat.js';
 import workspace from '../api/workspace.js';
@@ -12,13 +14,34 @@ import { ASSISTANT_PROFILE, DEFAULT_MODEL } from '../shared/models.ts';
 import { readChatEvents } from '../src/lib/stream.ts';
 
 const url = 'https://bundle-check.invalid/api/chat';
-const status = await (await api.fetch(new Request(url))).json();
+const origin = new URL(url).origin;
+// Replace the real configuration only in this smoke-test process. Never
+// print or consume the deployment credential in the engine checks.
+const password = randomBytes(24).toString('base64url');
+process.env.XYVORA_UPDATE_KEY = await makeUpdateKey(password);
+for (const [path, route] of [['chat', api], ['account', account], ['analytics', analytics], ['workspace', workspace]]) {
+  const denied = await route.fetch(new Request(`${origin}/api/${path}`));
+  assert.equal(denied.status, 423, `${path} must be locked before any service work`);
+  assert.equal((await denied.json()).code, 'UPDATE_LOCKED');
+}
+const unlocked = await checkUpdateLock(new Request(`${origin}/_xyvora/unlock`, {
+  method: 'POST', headers: { Origin: origin }, body: new URLSearchParams({ password }),
+}), process.env, { deployed: true });
+assert.equal(unlocked?.status, 303, 'Fixture password did not unlock production handlers');
+const cookie = unlocked.headers.get('set-cookie').split(';', 1)[0];
+const earlyRequest = (address, init = {}) => {
+  const headers = new Headers(init.headers);
+  headers.set('Cookie', cookie);
+  return new Request(address, { ...init, headers });
+};
+console.log('XYVORA_UPDATE compiled API gate and independent fixture session verified');
+const status = await (await api.fetch(earlyRequest(url))).json();
 assert.deepEqual(status.assistant, ASSISTANT_PROFILE);
 assert.deepEqual(status.modes, MODE_IDS);
 assert.deepEqual(status.models, [DEFAULT_MODEL]);
 assert.doesNotMatch(JSON.stringify(status), /qwen/i);
-assert.deepEqual(await (await account.fetch(new Request('https://bundle-check.invalid/api/account'))).json(), guestAccount());
-assert.equal((await (await analytics.fetch(new Request('https://bundle-check.invalid/api/analytics'))).json()).available, false);
+assert.deepEqual(await (await account.fetch(earlyRequest('https://bundle-check.invalid/api/account'))).json(), guestAccount());
+assert.equal((await (await analytics.fetch(earlyRequest('https://bundle-check.invalid/api/analytics'))).json()).available, false);
 assert.ok(!(await readdir('dist', { recursive: true })).some((file) => file.endsWith('.gguf')));
 const networkFetch = globalThis.fetch;
 let lookupsAllowed = false;
@@ -36,7 +59,7 @@ globalThis.fetch = async (url, options) => {
 
 async function check(label, content, expected, { timeZone = 'UTC', searchQuery, mode, source = 'server', skill } = {}) {
   const start = performance.now();
-  const response = await api.fetch(new Request(url, {
+  const response = await api.fetch(earlyRequest(url, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ model: DEFAULT_MODEL, messages: [{ role: 'user', content }], timeZone, searchQuery, mode }),
   }));
@@ -66,7 +89,7 @@ await check('Pro generation', 'What is the capital of Japan? Answer in one short
 await check('Instant generation', 'What is the capital of France? Answer in one short sentence.', /paris/i, { mode: 'instant' });
 // Cancel real native generation and verify the next request on the same state.
 const stop = new AbortController();
-const interrupted = await api.fetch(new Request(url, {
+const interrupted = await api.fetch(earlyRequest(url, {
   method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: stop.signal,
   body: JSON.stringify({ model: DEFAULT_MODEL, messages: [{ role: 'user', content: 'Write a long fictional travel diary about a place called Orchid Ridge.' }] }),
 }));
@@ -80,7 +103,7 @@ if (process.argv.includes('--search')) {
   console.log(`XYVORA_BUNDLE provider check: ${[...new Set(independent.map(({ provider }) => provider))].join(', ') || 'no results'}`);
   await check('live search', 'What is NASA’s Artemis program?', /artemis|nasa|moon/i, { searchQuery: 'NASA Artemis program', mode: 'instant' });
 }
-const apiRequest = (data) => new Request('https://bundle-check.invalid/api/workspace', {
+const apiRequest = (data) => earlyRequest('https://bundle-check.invalid/api/workspace', {
   method: 'POST', headers: { Origin: 'https://bundle-check.invalid', 'Content-Type': 'application/json' },
   body: JSON.stringify({ action: 'api', method: 'GET', target: PUBLIC_API_EXAMPLE, ...data }),
 });
@@ -88,7 +111,7 @@ if (!WORKSPACE_PLUGINS_ENABLED) {
   const response = await workspace.fetch(apiRequest({ approved: true }));
   assert.equal(response.status, 404);
   assert.equal(response.headers.get('cache-control'), 'no-store');
-  assert.equal((await workspace.fetch(new Request('https://bundle-check.invalid/api/workspace?code=old&state=old'))).status, 404);
+  assert.equal((await workspace.fetch(earlyRequest('https://bundle-check.invalid/api/workspace?code=old&state=old'))).status, 404);
   console.log('XYVORA_BUNDLE plugin routes paused');
 } else {
   assert.equal((await workspace.fetch(apiRequest({ approved: false }))).status, 403);

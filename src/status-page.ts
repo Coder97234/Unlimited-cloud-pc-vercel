@@ -1,8 +1,9 @@
+import { PUBLIC_CREDENTIALS } from './lib/early-access.ts';
 const summary = document.getElementById('service-summary')!;
 const button = document.querySelector<HTMLButtonElement>('#refresh-services')!;
 async function check(path: string) {
   try {
-    const response = await fetch(path, { cache: 'no-store', credentials: 'omit', signal: AbortSignal.timeout(8_000) });
+    const response = await fetch(path, { cache: 'no-store', credentials: PUBLIC_CREDENTIALS, signal: AbortSignal.timeout(8_000) });
     return response.ok ? await response.json() : undefined;
   } catch { return undefined; }
 }

@@ -7,8 +7,8 @@ import { loadThreads, storeThreads } from './history.ts';
 
 type State = { chats: Thread[]; base?: CloudHistory; problem?: string; conflict?: CloudHistory };
 
-export function useChatHistory(accountId: string | undefined, checking: boolean, busy: boolean) {
-  const [state, setState] = useState<State>(() => ({ chats: checking || accountId ? [] : loadThreads() }));
+export function useChatHistory(accountId: string | undefined, checking: boolean, busy: boolean, enabled = true) {
+  const [state, setState] = useState<State>(() => ({ chats: !enabled || checking || accountId ? [] : loadThreads() }));
   const current = useRef(state);
   const localBase = useRef(state.chats);
   const inFlight = useRef<AbortController | null>(null);
@@ -22,13 +22,13 @@ export function useChatHistory(accountId: string | undefined, checking: boolean,
     chats: typeof value === 'function' ? value(before.chats) : value,
   }));
   useEffect(() => {
-    if (accountId || checking || busy || localBase.current === state.chats) return;
+    if (!enabled || accountId || checking || busy || localBase.current === state.chats) return;
     if (storeThreads(state.chats)) { localBase.current = state.chats; setLocalWarning(''); }
     else setLocalWarning('This browser could not save chat history.');
-  }, [state.chats, accountId, checking, busy]);
+  }, [state.chats, accountId, checking, busy, enabled]);
 
   useEffect(() => {
-    if (!accountId) return;
+    if (!accountId || !enabled) return;
     const load = new AbortController();
     let reading = false;
     const refresh = async () => {
@@ -57,12 +57,12 @@ export function useChatHistory(accountId: string | undefined, checking: boolean,
       load.abort(); clearInterval(interval);
       window.removeEventListener('storage', storage); document.removeEventListener('visibilitychange', visibility);
     };
-  }, [accountId, reload]);
+  }, [accountId, reload, enabled]);
   useEffect(() => () => { inFlight.current?.abort(); inFlight.current = null; }, []);
 
   useEffect(() => {
     const { base, chats, problem, conflict } = state;
-    if (!accountId || !base || base.chats === chats || busy || problem || conflict || saving || inFlight.current) return;
+    if (!enabled || !accountId || !base || base.chats === chats || busy || problem || conflict || saving || inFlight.current) return;
     const timer = setTimeout(() => {
       if (inFlight.current) return;
       const send = inFlight.current = new AbortController();
@@ -98,7 +98,7 @@ export function useChatHistory(accountId: string | undefined, checking: boolean,
       });
     }, 180);
     return () => clearTimeout(timer);
-  }, [state, accountId, busy, saving]);
+  }, [state, accountId, busy, saving, enabled]);
   return {
     chats: state.chats,
     setChats,

@@ -10,7 +10,7 @@ import { defineConfig, loadEnv } from 'vite';
 import type { Connect, Plugin } from 'vite';
 import { handleChat } from './server/chat.ts';
 import { generateOnServer } from './server/inference.ts';
-import { searchWeb } from './server/web-search.ts';
+import { researchWeb, searchWeb } from './server/web-search.ts';
 import { handleWorkspace } from './server/workspace.ts';
 import { handleAnalytics } from './server/analytics.ts';
 import { productionDb } from './server/database.ts';
@@ -18,10 +18,11 @@ import { localPlatformDb } from './server/local-database.ts';
 import { handleJobs } from './server/jobs.ts';
 import { workTextQueue } from './server/job-worker.ts';
 import type { SendAccountMail } from './server/account-email.ts';
-import { accountConfig, handleAccount } from './server/account.ts';
+import { accountConfig, handleAccount, hostedModelsFor, projectContextFor } from './server/account.ts';
 import { workspaceConfig } from './server/workspace-connections.ts';
 import { XYVORA_URL } from './shared/site.ts';
 import { WORKSPACE_PLUGINS_ENABLED } from './shared/workspace-tools.ts';
+import { checkUpdateLock, updateCacheHeaders, updateLocked } from './server/update-lock.ts';
 import { PUBLIC_PAGES, publicPages } from './server/public-pages.ts';
 
 function apiInDevelopment(env: Record<string, string | undefined>): Plugin {
@@ -29,18 +30,21 @@ function apiInDevelopment(env: Record<string, string | undefined>): Plugin {
   const local = env.XYVORA_LOCAL_PLATFORM === '1';
   const db = local ? localPlatformDb(env.XYVORA_LOCAL_PLATFORM_DIR) : productionDb(env);
   // Test the selected email flow without ever sending mail in local platform mode.
-  const identityEnv = local ? { XYVORA_ENABLE_PASSWORDS: '1', XYVORA_ENABLE_BACKGROUND: '1', XYVORA_MAIL_PROVIDER: env.XYVORA_MAIL_PROVIDER,
+  const identityEnv = local ? { XYVORA_ENABLE_PASSWORDS: '1', XYVORA_ENABLE_BACKGROUND: '1', XYVORA_ENABLE_PROJECTS: '1', XYVORA_ENABLE_SESSIONS: '1', XYVORA_ENABLE_LIBRARY: env.XYVORA_ENABLE_LIBRARY === '0' ? '0' : '1', XYVORA_MAIL_PROVIDER: env.XYVORA_MAIL_PROVIDER,
     XYVORA_AUTH_SECRET: env.XYVORA_AUTH_SECRET || randomBytes(32).toString('hex') } : env;
   const localMail: SendAccountMail | undefined = local ? async (message, signal) => {
     const dir = env.XYVORA_LOCAL_MAIL_DIR || '.cache/xyvora-platform-mail';
     await mkdir(dir, { recursive: true, mode: 0o700 });
     await writeFile(`${dir}/${randomUUID()}.json`, JSON.stringify(message), { mode: 0o600, flag: 'wx', signal });
   } : undefined;
-  const chat = { generate: realServerModel ? generateOnServer : undefined, search: realServerModel ? searchWeb : undefined, preview: !realServerModel, limit: realServerModel };
+  const chat = { generate: realServerModel ? generateOnServer : undefined, search: realServerModel ? searchWeb : undefined, research: realServerModel && env.XYVORA_ENABLE_RESEARCH === '1' ? researchWeb : undefined, preview: !realServerModel, limit: realServerModel };
+  const deployed = env.VERCEL === '1' || !!env.VERCEL_ENV;
+  const locked = updateLocked(env, deployed);
   const settings = WORKSPACE_PLUGINS_ENABLED ? workspaceConfig(env) : undefined;
   const middleware: Connect.NextHandleFunction = (incoming, outgoing, next) => {
     const path = incoming.url?.split('?')[0];
-    if (path !== '/api/chat' && path !== '/api/workspace' && path !== '/api/account' && path !== '/api/analytics') { next(); return; }
+    const api = path === '/api/chat' || path === '/api/workspace' || path === '/api/account' || path === '/api/analytics';
+    if (!locked && !api) { next(); return; }
     const controller = new AbortController();
     outgoing.once('close', () => { if (!outgoing.writableEnded) controller.abort(); });
     void (async () => {
@@ -50,7 +54,7 @@ function apiInDevelopment(env: Record<string, string | undefined>): Plugin {
       }
       const method = incoming.method ?? 'GET';
       const init: RequestInit & { duplex?: 'half' } = { method, headers, signal: controller.signal };
-      if (method !== 'GET' && method !== 'HEAD') {
+      if (method !== 'GET' && method !== 'HEAD' && (api || path === '/_xyvora/unlock' || path === '/_xyvora/relock')) {
         init.body = Readable.toWeb(incoming) as ReadableStream<Uint8Array>;
         init.duplex = 'half';
       }
@@ -58,13 +62,16 @@ function apiInDevelopment(env: Record<string, string | undefined>): Plugin {
       const tls = host.endsWith('.e2b.app') || headers.get('x-forwarded-proto') === 'https';
       const request = new Request(`${tls ? 'https' : 'http'}://${host}${incoming.url}`, init);
       const url = new URL(request.url);
+      const gate = locked ? await checkUpdateLock(request, env, { deployed, ip: incoming.socket.remoteAddress }) : undefined;
+      if (locked && !gate) Object.entries(updateCacheHeaders).forEach(([name, value]) => outgoing.setHeader(name, value));
+      if (!api && !gate) { next(); return; }
       const localOrigin = local && (url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname.endsWith('.e2b.app')) ? url.origin : undefined;
       const accounts = local && !localOrigin ? undefined : accountConfig(identityEnv, db, localOrigin, localMail);
-      const response = path === '/api/account' ? await handleAccount(request, accounts)
+      const response = gate ?? (path === '/api/account' ? await handleAccount(request, accounts)
         : path === '/api/analytics' ? await handleAnalytics(request, accounts?.origin ?? env.XYVORA_ACCOUNT_ORIGIN ?? XYVORA_URL, accounts?.db)
         : path === '/api/workspace' ? await handleWorkspace(request, settings, { limit: false })
         : url.searchParams.get('work') === 'jobs' ? await handleJobs(request, accounts)
-        : await handleChat(request, chat);
+        : await handleChat(request, { ...chat, projectContext: projectContextFor(accounts), hosted: hostedModelsFor(accounts, chat.generate) }));
       outgoing.statusCode = response.status;
       response.headers.forEach((value, key) => { if (key !== 'set-cookie') outgoing.setHeader(key, value); });
       const cookies = response.headers.getSetCookie();
@@ -98,6 +105,7 @@ export default defineConfig(({ mode }) => {
   const previewHeaders = Object.fromEntries(vercel.headers[0].headers.map(({ key, value }) => [key, value]));
   return {
     appType: 'mpa',
+    define: { __XYVORA_EARLY_ACCESS__: JSON.stringify(updateLocked(env, env.VERCEL === '1' || !!env.VERCEL_ENV)) },
     build: { rolldownOptions: { input: PUBLIC_PAGES.map(([, file]) => fileURLToPath(new URL(`./${file}`, import.meta.url))) } },
     plugins: [publicPages(), react(), apiInDevelopment(env)],
     server: {

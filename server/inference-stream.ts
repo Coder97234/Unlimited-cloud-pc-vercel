@@ -1,11 +1,12 @@
+import type { HostedModel } from '../shared/hosted-models.ts';
 import type { ReplyMode } from '../shared/modes.ts';
 import type { ChatMessage } from '../shared/models.ts';
 import type { WebSource } from '../shared/search.ts';
 
-export type Evidence = { mode?: ReplyMode; task?: 'translate'; clock?: string; preferences?: string; sources?: WebSource[] };
+export type Evidence = { report?: boolean; project?: string; mode?: ReplyMode; task?: 'translate'; clock?: string; preferences?: string; sources?: WebSource[] };
 export type ServerGenerate = (messages: ChatMessage[], signal: AbortSignal, onText: (text: string) => void, evidence: Evidence) => Promise<void>;
 
-type StreamOutput = { text: (value: string) => void; sources: (value: WebSource[]) => void };
+type StreamOutput = { model: (model?: HostedModel) => void; text: (value: string) => void; sources: (value: WebSource[]) => void };
 
 // Only explicitly safe messages from our server are forwarded to the browser.
 export class InferenceError extends Error {}
@@ -31,6 +32,7 @@ export function inferenceStream(work: (signal: AbortSignal, output: StreamOutput
               if (text.trim()) hasText = true;
               send({ choices: [{ delta: { content: text } }] });
             },
+            model: (model) => { if (model && !signal.aborted) send({ hostedModel: model }); },
             sources: (sources) => { if (!signal.aborted) send({ sources }); },
           });
           signal.throwIfAborted();

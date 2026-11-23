@@ -4,8 +4,9 @@ import { ACCOUNT_PROVIDERS, EMAIL_CODE_LENGTH, EMAIL_CODE_MINUTES, EMAIL_RESEND_
 import type { AccountLink, AccountStatus, EmailPurpose } from '../../shared/account.ts';
 import { MAX_ACCOUNT_MEMORY_CHARS, MAX_ACCOUNT_MEMORY_NOTES, MAX_MEMORY_CHARS, MAX_MEMORY_NOTE, MAX_MEMORY_NOTES, parseMemory, parseMemoryNotes } from '../../shared/memory.ts';
 import type { MemoryProfile } from '../../shared/memory.ts';
-import { deleteAccount, finishAccountEmail, passwordSignIn, requestAccountEmail, saveMemory, signOut, startSignIn } from '../lib/account.ts';
+import { deleteAccount, finishAccountEmail, passwordSignIn, requestAccountEmail, saveMemory, signOut, startSignIn, supabaseEmail } from '../lib/account.ts';
 import { Dialog } from './Dialog.tsx';
+import { SessionSettings } from './SessionSettings.tsx';
 
 function useAction() {
   const [busy, setBusy] = useState(false);
@@ -30,12 +31,17 @@ export function AccountDialog({ account, error, unsynced, initialView, onRetry, 
   const [view, setView] = useState<'login' | 'signup' | 'reset'>(initialView ?? 'login');
   const [sent, setSent] = useState(false);
   const [email, setEmail] = useState('');
-  const codeMode = account.emailVerification === 'code';
-  const awaitingCode = account.passwords && codeMode && sent;
+  const [legacy, setLegacy] = useState(false);
+  const auth = legacy ? undefined : account.supabase;
+  const providers = auth?.providers ?? account.providers;
+  const passwords = auth?.passwords ?? account.passwords;
+  const codeMode = !!auth || account.emailVerification === 'code';
+  const awaitingCode = passwords && codeMode && sent;
   const purpose = view === 'reset' ? 'reset' : 'signup';
   function show(next: typeof view) { setView(next); setSent(false); task.clear(); }
+  const [showSessions, setShowSessions] = useState(false);
   const [remove, setRemove] = useState(false);
-  return <Dialog title={account.user ? 'Your Xyvora account' : awaitingCode ? 'Check your email' : view === 'reset' ? 'Reset your password' : account.passwords || account.providers.length ? view === 'signup' ? 'Create a Xyvora account' : 'Sign in to Xyvora' : 'Guest workspace'}
+  return <Dialog title={account.user ? 'Your Xyvora account' : awaitingCode ? 'Check your email' : view === 'reset' ? 'Reset your password' : passwords || providers.length ? view === 'signup' ? 'Create a Xyvora account' : 'Sign in to Xyvora' : 'Guest workspace'}
     subtitle={account.user ? 'Manage your sign-in and saved workspace.' : 'Sign-in is optional. Guest chats stay on this device.'} onClose={() => { if (!task.busy) onClose(); }}>
     {account.user ? <>
       <div className="identity-card"><span className="plugin-icon tint-violet"><UserRound size={20} /></span><div>
@@ -48,29 +54,41 @@ export function AccountDialog({ account, error, unsynced, initialView, onRetry, 
         <button type="button" className="secondary-button" onClick={() => void task.run((signal) => signOut(account.user!.id, signal))} disabled={task.busy}><LogOut size={15} /> Sign out</button>
         <button type="button" className="text-button" disabled={task.busy} onClick={() => setRemove(!remove)} aria-expanded={remove}>Delete account</button>
       </div>
+      {account.sessions && <button type="button" className="secondary-button session-trigger" onClick={() => setShowSessions(!showSessions)} aria-expanded={showSessions}>{showSessions ? 'Hide active sessions' : 'Manage sessions'}</button>}
+      {showSessions && account.sessions && <SessionSettings account={account.user.id} />}
       {remove && <div className="confirm-box"><p>Delete your Xyvora account, saved chats, settings, notes, background tasks, and all sessions? Previously exported files aren’t affected. This can’t be undone.</p>
         <div><button type="button" className="secondary-button" disabled={task.busy} onClick={() => setRemove(false)}>Cancel</button>
           <button type="button" className="danger-button" disabled={task.busy} onClick={() => void task.run((signal) => deleteAccount(account.user!.id, signal))}><Trash2 size={15} /> Delete permanently</button></div>
       </div>}
-    </> : account.providers.length || account.passwords ? <>
-      {account.providers.length > 0 && <>
+    </> : providers.length || passwords ? <>
+      {providers.length > 0 && <>
         <p className="form-hint">Choose a provider to sign in or create your Xyvora account on your first visit. Finish unsent drafts first. This only signs you in to Xyvora.</p>
         <div className="provider-options">
-          {account.providers.map((provider) => <button className="provider-option" type="button" key={provider} disabled={task.busy}
-            onClick={() => void task.run((signal) => startSignIn(provider, signal))}>
+          {providers.map((provider) => <button className="provider-option" type="button" key={provider} disabled={task.busy}
+            onClick={() => void task.run((signal) => startSignIn(provider, signal, auth))}>
             <span className="provider-mark" aria-hidden="true">{ACCOUNT_PROVIDERS[provider].slice(0, 1)}</span>
             <strong>Continue with {ACCOUNT_PROVIDERS[provider]}</strong><ArrowUpRight size={15} />
           </button>)}
         </div>
       </>}
-      {account.passwords && <>
+      {auth && <p className="form-hint">Sign-in and verification are handled by Supabase Auth.</p>}
+      {account.supabase && (account.passwords || account.providers.length > 0) && <button className="text-button" type="button" disabled={task.busy} onClick={() => { setLegacy(!legacy); show('login'); }}>
+        {legacy ? 'Use Supabase sign-in' : 'Use existing Xyvora sign-in'}
+      </button>}
+      {passwords && <>
         {view !== 'reset' && <div className="theme-options auth-tabs" aria-label="Account action">
           <button type="button" className="theme-choice" aria-pressed={view === 'login'} disabled={task.busy} onClick={() => show('login')}>Sign in</button>
           <button type="button" className="theme-choice" aria-pressed={view === 'signup'} disabled={task.busy} onClick={() => show('signup')}>Sign up</button>
         </div>}
         {awaitingCode ? <>
           <p className="form-hint" role="status">{purpose === 'signup' ? 'If this address can be used to sign up, we’ll email a code.' : 'If this address has a password account, we’ll email a reset code.'} Use the latest code within {EMAIL_CODE_MINUTES} minutes.</p>
-          <AccountPasswordForm challenge={{ purpose, email }} task={task} />
+          {auth && purpose === 'signup' ? <form className="plugin-fields" onSubmit={(event) => {
+            event.preventDefault(); const fields = new FormData(event.currentTarget);
+            void task.run((signal) => supabaseEmail('confirm', email, signal, undefined, String(fields.get('code') ?? '')));
+          }}>
+            <label className="field-label">Verification code<input className="plugin-input" name="code" required pattern="[0-9]{6}" maxLength={6} inputMode="numeric" autoComplete="one-time-code" data-dialog-focus disabled={task.busy} /></label>
+            <div className="dialog-actions"><button type="submit" className="plugin-primary" disabled={task.busy}>Verify and sign in</button></div>
+          </form> : <AccountPasswordForm challenge={{ purpose, email }} task={task} supabase={!!auth} />}
           <p className="form-hint">No email? Check spam or wait {EMAIL_RESEND_SECONDS} seconds before requesting another code.</p>
           <button type="button" className="text-button" disabled={task.busy} onClick={() => show(view)}>Change email or resend</button>
         </> : sent ? <div className="confirm-box" role="status">
@@ -80,14 +98,22 @@ export function AccountDialog({ account, error, unsynced, initialView, onRetry, 
           event.preventDefault();
           const fields = new FormData(event.currentTarget);
           void task.run(async (signal) => {
-            if (view === 'login') await passwordSignIn(email, String(fields.get('password') ?? ''), signal);
+            const password = String(fields.get('password') ?? '');
+            if (auth) {
+              if (view === 'signup' && password !== fields.get('confirm')) throw new Error('The passwords do not match.');
+              await supabaseEmail(view === 'reset' ? 'recover' : view, email, signal, password || undefined);
+              if (view !== 'login') { signal.throwIfAborted(); setSent(true); }
+            } else if (view === 'login') await passwordSignIn(email, password, signal);
             else { await requestAccountEmail(purpose, email, signal); signal.throwIfAborted(); setSent(true); }
           });
         }}>
           <label className="field-label">Email<input className="plugin-input" name="email" type={view === 'login' ? 'text' : 'email'} inputMode="email" value={email}
             onChange={({ target }) => setEmail(target.value)} autoComplete={view === 'login' ? 'username' : 'email'} autoCapitalize="none" spellCheck={false} maxLength={254} required disabled={task.busy} data-dialog-focus={codeMode && view !== 'login' || undefined} /></label>
           {view === 'login' && <label className="field-label">Password<input className="plugin-input" name="password" type="password" autoComplete="current-password" maxLength={128} required disabled={task.busy} /></label>}
-          {view === 'signup' && <p className="form-hint">We’ll email a {codeMode ? 'code' : 'link'} to verify your address before you choose a password.</p>}
+          {auth && view === 'signup' ? <><label className="field-label">Password<input className="plugin-input" name="password" type="password" minLength={12} maxLength={72} autoComplete="new-password" required disabled={task.busy} /></label>
+            <label className="field-label">Confirm password<input className="plugin-input" name="confirm" type="password" autoComplete="new-password" maxLength={72} required disabled={task.busy} /></label>
+            <p className="form-hint">Use at least 12 characters. You’ll need the verification code to finish creating this account.</p></>
+            : view === 'signup' && <p className="form-hint">We’ll email a {codeMode ? 'code' : 'link'} to verify your address before you choose a password.</p>}
           <div className="dialog-actions">
             {view !== 'signup' && <button type="button" className="text-button" disabled={task.busy} onClick={() => show(view === 'reset' ? 'login' : 'reset')}>{view === 'reset' ? 'Back to sign in' : 'Forgot password?'}</button>}
             <button type="submit" className="plugin-primary" disabled={task.busy}>{task.busy ? 'Working…' : view === 'login' ? 'Sign in with password' : `Email ${purpose === 'signup' ? 'verification' : 'reset'} ${codeMode ? 'code' : 'link'}`}</button>
@@ -104,7 +130,7 @@ export function AccountDialog({ account, error, unsynced, initialView, onRetry, 
   </Dialog>;
 }
 
-function AccountPasswordForm({ challenge, task }: { challenge: AccountLink | { purpose: EmailPurpose; email: string }; task: ReturnType<typeof useAction> }) {
+function AccountPasswordForm({ challenge, task, supabase }: { challenge: AccountLink | { purpose: EmailPurpose; email: string }; task: ReturnType<typeof useAction>; supabase?: boolean }) {
   const [mismatch, setMismatch] = useState(false);
   const signup = challenge.purpose === 'signup';
   return <form className="plugin-fields" onSubmit={(event) => {
@@ -114,7 +140,7 @@ function AccountPasswordForm({ challenge, task }: { challenge: AccountLink | { p
     if (password !== fields.get('confirm')) { setMismatch(true); task.clear(); return; }
     setMismatch(false);
     const proof = 'email' in challenge ? { ...challenge, code: String(fields.get('code') ?? '') } : challenge;
-    void task.run((signal) => finishAccountEmail(proof, password, signal));
+    void task.run((signal) => supabase && 'email' in proof ? supabaseEmail('reset', proof.email, signal, password, proof.code) : finishAccountEmail(proof, password, signal));
   }}>
     {'email' in challenge && <label className="field-label">{signup ? 'Verification code' : 'Reset code'}<input className="plugin-input" name="code" type="text" inputMode="numeric"
       autoComplete="one-time-code" pattern={`[0-9]{${EMAIL_CODE_LENGTH}}`} minLength={EMAIL_CODE_LENGTH} maxLength={EMAIL_CODE_LENGTH} required disabled={task.busy} data-dialog-focus /></label>}

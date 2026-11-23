@@ -30,6 +30,7 @@ type Props = {
   readingFiles: boolean;
   mode: ReplyMode;
   onMode: () => void;
+  hostedLabel?: string;
   onSend: () => void;
   onStop: () => void;
   webSearch: boolean;
@@ -39,7 +40,7 @@ type Props = {
   isolated: boolean;
 };
 
-export function Composer({ draft, onDraft, textarea, files, photo, canAnalyze, onRemovePhoto, filePicker, checking, usesMemory, onAttach, onRemoveFile, readingFiles, mode, onMode, onSend, onStop, webSearch, canSearch, onToggleSearch, busy, isolated }: Props) {
+export function Composer({ draft, onDraft, textarea, files, photo, canAnalyze, onRemovePhoto, filePicker, checking, usesMemory, onAttach, onRemoveFile, readingFiles, mode, onMode, hostedLabel, onSend, onStop, webSearch, canSearch, onToggleSearch, busy, isolated }: Props) {
   const searchEnabled = allowsSearchToggle(draft);
   const explicit = explicitSearchQuery(draft) !== undefined;
   const query = photo ? undefined : chatSearchQuery(draft, webSearch);
@@ -82,11 +83,11 @@ export function Composer({ draft, onDraft, textarea, files, photo, canAnalyze, o
       if (!images.length || event.clipboardData.getData('text/plain')) return;
       event.preventDefault(); if (attachEnabled) onAttach(images);
     }}>
-    {dropping && <div className="file-drop-hint" aria-live="polite"><Paperclip size={15} /> Drop images, PDFs, or text and code files</div>}
+    {dropping && <div className="file-drop-hint" aria-live="polite"><Paperclip size={15} /> Drop images, documents, spreadsheets, or text files</div>}
     {(files.length > 0 || photo || readingFiles) && <div className="attachment-list" aria-label="Attachments">
       {files.map((file) => <div className="file-card" key={file.id}>
         <details>
-          <summary title={file.name}><Paperclip size={14} /><span>{file.name}</span><small>{file.name.toLowerCase().endsWith('.pdf') ? 'PDF' : 'Text'} preview</small></summary>
+          <summary title={file.name}><Paperclip size={14} /><span>{file.name}</span><small>{(/\.(pdf|docx|xlsx)$/i.exec(file.name)?.[1]?.toUpperCase() ?? 'Text')} preview</small></summary>
           <pre className="attachment-excerpt" aria-label={`${file.name} preview`} tabIndex={0}>{file.text.slice(0, 900)}{(file.truncated || file.text.length > 900) && '\n… (excerpt)'}</pre>
         </details>
         <button type="button" className="bare-icon" onClick={() => onRemoveFile(file.id)} aria-label={`Remove ${file.name}`} disabled={busy || readingFiles}><X size={14} /></button>
@@ -145,6 +146,7 @@ export function Composer({ draft, onDraft, textarea, files, photo, canAnalyze, o
           : <button type="submit" className="send-button" title={photo ? 'Review image upload' : 'Send message'} aria-label={photo ? 'Review image upload' : 'Send message'} disabled={!canSend}><ArrowUp size={21} strokeWidth={2.3} /></button>}
       </div>
     </div>
+    {hostedLabel && !photo && <p className="context-disclosure hosted-disclosure"><ShieldCheck size={13} /> <span>{hostedLabel}: your prompt and any included chat, notes, or files may be sent to the selected provider.</span></p>}
     {isolated && <p className="context-disclosure"><ShieldCheck size={13} /> This message only · Earlier exchanges and saved memory aren’t included.</p>}
     {usesMemory && !photo && <p className="context-disclosure"><Brain size={13} /> Saved memory can be used for this reply.</p>}
     {photo && <p id="vision-disclosure" className="search-disclosure">{!canAnalyze ? 'This is a local preview. Remove the image to send a text message.' : draft.trim().length > limit ? `Keep your question to ${limit} characters.` : 'Review before sending the image and question to OpenAI. No prior chat or memory is sent.'}</p>}

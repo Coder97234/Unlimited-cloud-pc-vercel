@@ -1,3 +1,4 @@
+import type { HostedModel } from './hosted-models.ts';
 import type { WorkspacePreferences } from './preferences.ts';
 
 export const ACCOUNT_PROVIDERS = { google: 'Google', github: 'GitHub', discord: 'Discord' } as const;
@@ -7,8 +8,10 @@ export const ACCOUNT_AUTH_PATHS = {
 } as const;
 export const isAccountProvider = (value: unknown): value is AccountProvider => typeof value === 'string' && Object.hasOwn(ACCOUNT_PROVIDERS, value);
 export const isAccountId = (value: unknown): value is string => typeof value === 'string' && /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(value);
+export const isSupabaseAuthOrigin = (value: unknown): value is string => typeof value === 'string' && /^https:\/\/[a-z0-9]{20}\.supabase\.co$/.test(value);
+export type SupabaseAuthPublic = { origin: string; providers: ('google' | 'github')[]; passwords: boolean };
 export type PublicAccount = { id: string; name: string; email: string };
-export type AccountStatus = { providers: AccountProvider[]; passwords: boolean; user: PublicAccount | null; background: boolean; emailVerification?: 'code'; settings?: WorkspacePreferences };
+export type AccountStatus = { providers: AccountProvider[]; passwords: boolean; user: PublicAccount | null; background: boolean; emailVerification?: 'code'; settings?: WorkspacePreferences; projects?: boolean; library?: boolean; hostedModels?: HostedModel[]; supabase?: SupabaseAuthPublic; sessions?: boolean };
 export const guestAccount = (): AccountStatus => ({ providers: [], passwords: false, user: null, background: false });
 
 export type EmailPurpose = 'signup' | 'reset';

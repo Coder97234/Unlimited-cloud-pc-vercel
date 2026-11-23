@@ -1,5 +1,7 @@
-import { ACCOUNT_AUTH_PATHS, isAccountId, isAccountProvider } from '../../shared/account.ts';
-import type { AccountLink, AccountProvider, AccountStatus, EmailPurpose } from '../../shared/account.ts';
+import { parseHostedModel } from '../../shared/hosted-models.ts';
+import type { HostedModel } from '../../shared/hosted-models.ts';
+import { ACCOUNT_AUTH_PATHS, isAccountId, isAccountProvider, isSupabaseAuthOrigin } from '../../shared/account.ts';
+import type { AccountLink, AccountProvider, AccountStatus, EmailPurpose, SupabaseAuthPublic } from '../../shared/account.ts';
 import { emptyMemory, parseMemory } from '../../shared/memory.ts';
 import type { MemoryProfile } from '../../shared/memory.ts';
 import { forgetThreads } from './history.ts';
@@ -10,20 +12,24 @@ import type { WorkspacePreferences } from '../../shared/preferences.ts';
 
 export const guestMemoryKey = 'xyvora.memory.v1';
 export const accountChangeKey = 'xyvora.account.change';
+export const invalidSessionEvent = 'xyvora:invalid-session';
 export const accountMemoryChangeKey = (id: string) => `xyvora.memory.changed.${id}`;
 export const accountHistoryChangeKey = (id: string) => `xyvora.history.changed.${id}`;
 export function notifyAccountChange(key = accountChangeKey) {
   try { localStorage.setItem(key, crypto.randomUUID()); } catch { /* Session cookies still work. */ }
 }
 
-async function accountJson(path: '' | '?section=memory' | '?section=settings' | '?section=history', signal: AbortSignal, payload?: object, accountId?: string) {
+export async function accountJson(path: string, signal: AbortSignal, payload?: object, accountId?: string) {
   const response = await fetch(`/api/account${path}`, {
-    cache: 'no-store', signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]),
+    cache: 'no-store', signal: AbortSignal.any([signal, AbortSignal.timeout((payload as { action?: unknown } | undefined)?.action === 'supabase-auth' ? 28_000 : 15_000)]),
     headers: { ...(payload && { 'Content-Type': 'application/json' }), ...(accountId && { 'X-Xyvora-Account': accountId }) },
     ...(payload && { method: 'POST', body: JSON.stringify(payload), keepalive: path === '?section=settings' }),
   });
   const value = await response.json().catch(() => null);
-  if (path === '?section=history' && response.status === 409 && value?.conflict === true) return value;
+  if ((path === '?section=history' || path === '?section=library') && response.status === 409 && value?.conflict === true) return value;
+  if (accountId && typeof window !== 'undefined' && (response.status === 401 || (response.status === 409 && value?.error === 'Your account changed. Refresh and try again.'))) {
+    window.dispatchEvent(new Event(invalidSessionEvent));
+  }
   if (!response.ok || !value) throw new Error(typeof value?.error === 'string' ? value.error : 'The account service is unavailable.');
   return value;
 }
@@ -33,15 +39,19 @@ export async function loadAccount(signal: AbortSignal): Promise<AccountStatus> {
   const providers = Array.isArray(value.providers) ? value.providers.filter(isAccountProvider) : [];
   const user = value.user;
   if (user !== null && (!isAccountId(user?.id) || typeof user?.name !== 'string' || typeof user?.email !== 'string')) throw new Error('Could not verify your account.');
-  return { providers, user, passwords: value.passwords === true, background: value.background === true,
-    ...(value.passwords === true && value.emailVerification === 'code' && { emailVerification: 'code' as const }), settings: parsePreferences(value.settings) };
+  const hostedModels: HostedModel[] = Array.isArray(value.hostedModels) ? value.hostedModels.map(parseHostedModel).filter((model: HostedModel | undefined): model is HostedModel => !!model) : [];
+  const auth = value.supabase;
+  const supabase: SupabaseAuthPublic | undefined = isSupabaseAuthOrigin(auth?.origin) ? { origin: auth.origin, passwords: auth.passwords === true,
+    providers: Array.isArray(auth.providers) ? auth.providers.filter((name: unknown) => name === 'google' || name === 'github') : [] } : undefined;
+  return { providers, user, supabase, ...(user && hostedModels.length && { hostedModels }), passwords: value.passwords === true, background: value.background === true,
+    ...(value.passwords === true && value.emailVerification === 'code' && { emailVerification: 'code' as const }), settings: parsePreferences(value.settings), ...(value.projects === true && { projects: true }), ...(value.library === true && { library: true }), ...(value.sessions === true && { sessions: true }) };
 }
 
-export async function startSignIn(provider: AccountProvider, signal: AbortSignal) {
-  const value = await accountJson('', signal, { action: 'start', provider });
+export async function startSignIn(provider: AccountProvider, signal: AbortSignal, auth?: SupabaseAuthPublic) {
+  const value = await accountJson('', signal, auth ? { action: 'supabase-auth', operation: 'start', provider } : { action: 'start', provider });
   let redirect: URL;
   try { redirect = new URL(value.url); } catch { throw new Error('The sign-in page is unavailable.'); }
-  if (redirect.origin + redirect.pathname !== ACCOUNT_AUTH_PATHS[provider] || redirect.username || redirect.password || redirect.hash) throw new Error('The sign-in link was not valid.');
+  if (redirect.origin + redirect.pathname !== (auth ? `${auth.origin}/auth/v1/authorize` : ACCOUNT_AUTH_PATHS[provider]) || redirect.username || redirect.password || redirect.hash) throw new Error('The sign-in link was not valid.');
   signal.throwIfAborted();
   window.location.assign(redirect.href);
 }
@@ -57,6 +67,15 @@ function signedIn(result: { signedIn?: boolean }) {
   if (result.signedIn !== true) throw new Error('Could not sign in. Try again.');
   notifyAccountChange();
   window.location.replace('/?account=signed-in');
+}
+export async function supabaseEmail(operation: 'login' | 'signup' | 'confirm' | 'recover' | 'reset', email: string, signal: AbortSignal, password?: string, code?: string) {
+  const result = await accountJson('', signal, { action: 'supabase-auth', operation, email, password, code });
+  if (operation === 'login' || operation === 'confirm') return signedIn(result);
+  if (operation === 'reset') {
+    if (result.reset !== true) throw new Error('Could not reset your password. Try again.');
+    notifyAccountChange(); window.location.replace('/?account=password-reset'); return;
+  }
+  if (result.accepted !== true) throw new Error('Could not request email. Try again.');
 }
 export async function passwordSignIn(email: string, password: string, signal: AbortSignal) {
   signedIn(await accountJson('', signal, { action: 'login', email, password }));

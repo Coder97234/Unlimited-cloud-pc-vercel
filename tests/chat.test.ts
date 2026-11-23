@@ -4,6 +4,7 @@ import { ASSISTANT_PROFILE, DEFAULT_MODEL } from '../shared/models.ts';
 import { SKILL_IDS } from '../shared/skill-catalog.ts';
 import { test } from 'node:test';
 import vercelChat from '../server/vercel-chat.ts';
+import { checkUpdateLock, makeUpdateKey } from '../server/update-lock.ts';
 import { handleChat, parseChat } from '../server/chat.ts';
 import { InferenceError } from '../server/inference-stream.ts';
 import { WIBY_SEARCH_URL, WIKI_SEARCH_URL, searchWeb } from '../server/web-search.ts';
@@ -44,10 +45,22 @@ test('a missing backend never looks like successful inference', async () => {
   assert.equal((await reply.json()).code, 'MODEL_UNAVAILABLE');
 });
 
-test('Vercel advertises only the Xyvora identity, modes, and built-in tools, regardless of old Gateway headers', async () => {
-  const reply = await vercelChat.fetch(new Request(url, { headers: { 'x-vercel-oidc-token': 'mock-runtime-token' } }));
+test('Unlocked Vercel chat advertises only Xyvora identity, modes, and built-in tools, regardless of old Gateway headers', async (t) => {
+  const previous = process.env.XYVORA_UPDATE_KEY;
+  t.after(() => { if (previous === undefined) delete process.env.XYVORA_UPDATE_KEY; else process.env.XYVORA_UPDATE_KEY = previous; });
+  const password = 'in-process-chat-fixture';
+  process.env.XYVORA_UPDATE_KEY = await makeUpdateKey(password);
+  const origin = new URL(url).origin;
+  const pass = await checkUpdateLock(new Request(`${origin}/_xyvora/unlock`, {
+    method: 'POST', headers: { Origin: origin }, body: new URLSearchParams({ password }),
+  }), process.env, { deployed: true, limit: false });
+  assert.equal(pass?.status, 303);
+  const cookie = pass?.headers.get('set-cookie')?.split(';', 1)[0] ?? '';
+  const reply = await vercelChat.fetch(new Request(url, { headers: { Cookie: cookie, 'x-vercel-oidc-token': 'mock-runtime-token' } }));
   assert.deepEqual(await reply.json(), { assistant: ASSISTANT_PROFILE, availability: 'server', models: [DEFAULT_MODEL], webSearch: true, modes: MODE_IDS, skills: SKILL_IDS });
-  assert.equal((await vercelChat.fetch(request({ ...body, model: 'smollm' }))).status, 400);
+  const invalid = request({ ...body, model: 'smollm' });
+  invalid.headers.set('Cookie', cookie);
+  assert.equal((await vercelChat.fetch(invalid)).status, 400);
 });
 
 test('development preview streams labeled samples and rejects live search', async () => {

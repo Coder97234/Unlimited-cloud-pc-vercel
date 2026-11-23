@@ -59,6 +59,7 @@ export function forkThread(thread: Thread, turnId: string, kind: 'reply' | 'edit
   return {
     id: crypto.randomUUID(),
     title: `Branch · ${titleForPrompt(thread.title) || 'Untitled chat'}`,
+    projectId: thread.projectId,
     mode: 'chat',
     updatedAt: now,
     turns: thread.turns.slice(0, index + (kind === 'reply' ? 1 : 0)),

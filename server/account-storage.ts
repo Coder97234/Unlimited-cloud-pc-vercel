@@ -17,7 +17,8 @@ export async function changePreferences(db: PlatformDb, id: string, value: unkno
   return parsePreferences(row.settings) ?? {};
 }
 export async function readHistory(db: PlatformDb, id: string) {
-  const [row] = await db.query<{ revision: string; chats: unknown }>('select revision, chats from xyvora_cloud_history where account_id=$1', [id]);
+  const [row] = await db.query<{ revision: string; chats: unknown; migrated: boolean | null }>(`select revision, chats, (to_jsonb(h)->>'migrated')::boolean as migrated from xyvora_cloud_history h where account_id=$1`, [id]);
+  if (row?.migrated) throw new ToolError('These chats have moved to the conversation library. Reload Xyvora.', 409);
   const chats = row ? parseCloudThreads(row.chats) : [];
   if (!chats) throw new Error('Invalid saved history');
   return { revision: row?.revision ?? null, chats };
@@ -29,9 +30,12 @@ export async function changeHistory(db: PlatformDb, id: string, expected: unknow
   const data = JSON.stringify(chats);
   if (Buffer.byteLength(data) > MAX_CLOUD_HISTORY_BYTES) throw new ToolError('Cloud history is full. Export and remove some conversations before saving.', 413);
   const revision = randomUUID();
-  const changed = expected === null
-    ? await db.query('insert into xyvora_cloud_history (account_id, revision, chats) values ($1,$2,$3::jsonb) on conflict do nothing returning revision', [id, revision, data])
-    : await db.query('update xyvora_cloud_history set revision=$2, chats=$3::jsonb where account_id=$1 and revision=$4 returning revision', [id, revision, data, expected]);
+  const changed = await (expected === null
+    ? db.query('insert into xyvora_cloud_history (account_id, revision, chats) values ($1,$2,$3::jsonb) on conflict do nothing returning revision', [id, revision, data])
+    : db.query('update xyvora_cloud_history set revision=$2, chats=$3::jsonb where account_id=$1 and revision=$4 returning revision', [id, revision, data, expected])).catch((error) => {
+      if (error?.code === '55000') throw new ToolError('These chats have moved to the conversation library. Reload Xyvora.', 409);
+      throw error;
+    });
   if (!changed.length) return { conflict: true as const, ...(await readHistory(db, id)) };
   return { revision };
 }

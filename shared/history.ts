@@ -1,3 +1,6 @@
+import { parseHostedModel } from './hosted-models.ts';
+import type { HostedModel } from './hosted-models.ts';
+import { isProjectId } from './projects.ts';
 import { brandAnswer } from './branding.ts';
 import { wellFormedText } from './stored-text.ts';
 import { DEFAULT_MODE, isReplyMode } from './modes.ts';
@@ -16,6 +19,7 @@ export type ChatMode = 'chat' | 'compare';
 export type Attachment = TextAttachment;
 export type Answer = {
   model: SavedModelId;
+  hostedModel?: HostedModel;
   content: string;
   replyMode?: ReplyMode;
   state: 'working' | 'finished' | 'stopped' | 'error';
@@ -25,18 +29,20 @@ export type Answer = {
   error?: string;
 };
 export type Turn = { id: string; prompt: string; attachment?: Attachment; imageName?: string; searchQuery?: string; contextOnly?: true; answers: Answer[] };
-export type Thread = { id: string; title: string; mode: ChatMode; updatedAt: number; turns: Turn[] };
+export type Thread = { id: string; title: string; mode: ChatMode; updatedAt: number; turns: Turn[]; projectId?: string; pinned?: true; favorite?: true; archived?: true };
 
 export const MAX_THREADS = 24;
 export const MAX_TURNS = 30;
 
 function restoreAnswer(raw: unknown): Answer | undefined {
   if (!raw || typeof raw !== 'object') return;
-  const { model, content, state, source, skill, error, sources, replyMode } = raw as Record<string, unknown>;
+  const { model, content, state, source, skill, error, sources, replyMode, hostedModel: rawHosted } = raw as Record<string, unknown>;
   const id = model === 'local' || model === 'qwen-lite' ? DEFAULT_MODEL : model;
   if ((id !== DEFAULT_MODEL && !archiveIds.some((old) => old === id)) || typeof content !== 'string') return;
   const legacy = id !== DEFAULT_MODEL || model === 'local' || source === 'on-device' || source === 'legacy' || source === 'hosted';
+  const hostedModel = !legacy && source === 'server' ? parseHostedModel(rawHosted) : undefined;
   return {
+    ...(hostedModel && { hostedModel }),
     model: id as SavedModelId, content: safeText(brandAnswer(content), 36_000), replyMode: isReplyMode(replyMode) ? replyMode : DEFAULT_MODE,
     state: state === 'finished' || state === 'error' ? state : 'stopped',
     source: legacy ? 'legacy' : source === 'preview' || source === 'server' || source === 'clock' || source === 'skill' || source === 'vision' ? source : undefined,
@@ -47,20 +53,24 @@ function restoreAnswer(raw: unknown): Answer | undefined {
   };
 }
 
-const validId = (id: unknown): id is string => typeof id === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(id);
+export const isThreadId = (id: unknown): id is string => typeof id === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(id);
 const safeText = (text: string, max: number) => wellFormedText(text.slice(0, max));
 export const MAX_CLOUD_HISTORY_BYTES = 2_000_000;
 export type CloudHistory = { revision: string | null; chats: Thread[] };
 
-export function restoreThreads(parsed: unknown): Thread[] {
+export function restoreThreads(parsed: unknown, maxThreads = MAX_THREADS, maxTurns = MAX_TURNS): Thread[] {
   if (!Array.isArray(parsed)) return [];
-  return parsed.filter((thread) => thread && validId(thread.id) && typeof thread.title === 'string'
+  return parsed.filter((thread) => thread && isThreadId(thread.id) && typeof thread.title === 'string'
     && (thread.mode === 'chat' || thread.mode === 'compare') && Array.isArray(thread.turns))
-    .slice(0, MAX_THREADS)
+    .slice(0, maxThreads)
     .map((thread: Thread) => ({
       id: thread.id, title: safeText(thread.title, 100), mode: thread.mode, updatedAt: Number.isFinite(thread.updatedAt) ? thread.updatedAt : 0,
-      turns: thread.turns.filter((turn) => turn && validId(turn.id) && typeof turn.prompt === 'string' && Array.isArray(turn.answers))
-        .slice(-MAX_TURNS).map((turn) => ({
+      ...(isProjectId(thread.projectId) && { projectId: thread.projectId }),
+      ...(thread.pinned === true && { pinned: true as const }),
+      ...(thread.favorite === true && { favorite: true as const }),
+      ...(thread.archived === true && { archived: true as const }),
+      turns: thread.turns.filter((turn) => turn && isThreadId(turn.id) && typeof turn.prompt === 'string' && Array.isArray(turn.answers))
+        .slice(-maxTurns).map((turn) => ({
           id: turn.id, prompt: safeText(turn.prompt, MAX_PROMPT),
           contextOnly: turn.contextOnly === true ? true : undefined,
           imageName: typeof turn.imageName === 'string' ? safeText(turn.imageName, 100).replace(/[\x00-\x1f\x7f]/g, ' ').trim() || undefined : undefined,

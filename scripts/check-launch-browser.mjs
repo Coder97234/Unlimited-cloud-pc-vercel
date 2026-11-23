@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { readFile, readdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { deflateRawSync } from 'node:zlib';
 import { chromium } from 'playwright-core';
 import { WORKSPACE_PLUGINS_ENABLED } from '../shared/workspace-tools.ts';
 
@@ -15,6 +16,7 @@ const browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_C
 const errors = [];
 const expectedAuthFailure = new WeakSet();
 let deviceIndex = 0;
+const runAddress = randomUUID().slice(0, 4);
 const close = (page) => page.getByRole('dialog').getByRole('button', { name: 'Close dialog' }).click();
 const field = (page) => page.getByRole('textbox', { name: 'Message Xyvora' });
 const ask = async (page, prompt) => { await field(page).fill(prompt); await field(page).press('Enter'); };
@@ -31,10 +33,34 @@ function smallPdf() {
   const offsets = entries.map((entry, i) => { const offset = pdf.length; pdf += `${i + 1} 0 obj\n${entry}\nendobj\n`; return offset; });
   return Buffer.from(`${pdf}xref\n0 6\n0000000000 65535 f \n${offsets.map((o) => String(o).padStart(10, '0') + ' 00000 n \n').join('')}trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${pdf.length}\n%%EOF\n`);
 }
+function zipFixture(entries) {
+  const files = [], central = [];
+  let offset = 0;
+  for (const [path, contents] of Object.entries(entries)) {
+    const name = Buffer.from(path), value = Buffer.from(contents), packed = deflateRawSync(value);
+    let crc = 0xffffffff;
+    for (const byte of value) {
+      crc ^= byte;
+      for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ ((crc & 1) ? 0xedb88320 : 0);
+    }
+    crc = (crc ^ 0xffffffff) >>> 0;
+    const local = Buffer.alloc(30), item = Buffer.alloc(46);
+    local.writeUInt32LE(0x04034b50); local.writeUInt16LE(20, 4); local.writeUInt16LE(8, 8); local.writeUInt32LE(crc, 14);
+    local.writeUInt32LE(packed.length, 18); local.writeUInt32LE(value.length, 22); local.writeUInt16LE(name.length, 26);
+    item.writeUInt32LE(0x02014b50); item.writeUInt16LE(20, 4); item.writeUInt16LE(20, 6); item.writeUInt16LE(8, 10); item.writeUInt32LE(crc, 16);
+    item.writeUInt32LE(packed.length, 20); item.writeUInt32LE(value.length, 24); item.writeUInt16LE(name.length, 28); item.writeUInt32LE(offset, 42);
+    offset += local.length + name.length + packed.length;
+    files.push(local, name, packed); central.push(item, name);
+  }
+  const tail = Buffer.alloc(22);
+  tail.writeUInt32LE(0x06054b50); tail.writeUInt16LE(central.length/2, 8); tail.writeUInt16LE(central.length/2, 10);
+  tail.writeUInt32LE(central.reduce((sum, bytes) => sum + bytes.length, 0), 12); tail.writeUInt32LE(offset, 16);
+  return Buffer.concat([...files, ...central, tail]);
+}
 async function makeContext(width, scheme = 'light') {
   const context = await browser.newContext({ viewport: { width, height: width > 500 ? 900 : 844 }, isMobile: width < 500, hasTouch: width < 500, colorScheme: scheme,
     // Give only our local, disposable auth tests separate rate-limit buckets.
-    extraHTTPHeaders: { 'X-Vercel-Forwarded-For': `192.0.2.${++deviceIndex}` }, acceptDownloads: true });
+    extraHTTPHeaders: { 'X-Vercel-Forwarded-For': `2001:db8:${runAddress}::${(++deviceIndex).toString(16)}` }, acceptDownloads: true });
   context.on('page', (page) => {
     page.on('pageerror', (error) => errors.push(`${page.url()}: ${error.message}`));
     page.on('console', (message) => {
@@ -128,7 +154,7 @@ async function checkGuest(page, width) {
   const search = page.getByRole('dialog', { name: 'Search chats' });
   await expectVisible(search);
   await search.getByRole('searchbox').fill('84.50');
-  await search.getByRole('button', { name: '/calc 18% of 84.50' }).click();
+  await search.getByRole('button', { name: '/calc 18% of 84.50', exact: true }).click();
   await expectVisible(calc);
   await page.keyboard.press('Control+Shift+N');
   await page.getByRole('heading', { name: 'What’s on your mind?' }).waitFor();
@@ -165,7 +191,7 @@ async function checkGuest(page, width) {
     return data;
   }, [...smallPdf()]);
   await page.locator('form.composer').dispatchEvent('dragover', { dataTransfer: dropped });
-  await expectVisible(page.getByText('Drop images, PDFs, or text and code files'));
+  await expectVisible(page.getByText('Drop images, documents, spreadsheets, or text files'));
   await page.locator('form.composer').dispatchEvent('drop', { dataTransfer: dropped });
   await dropped.dispose();
   await page.locator('.file-card summary').filter({ hasText: 'launch.pdf' }).click();
@@ -444,6 +470,121 @@ async function login(page, email, password) {
   await dialog.getByRole('button', { name: 'Sign in with password' }).click();
   await expectVisible(page.getByRole('button', { name: 'Your account', exact: true }));
 }
+async function checkRichReplies(context, width) {
+  const page = await context.newPage();
+  const markdown = '```js\nconst count = 7;\n```\n\n```mermaid\nflowchart LR\nA[Plan] --> B[Build]\n```\n\n| Item | Count |\n| --- | --- |\n| Pears | 7 |';
+  try {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: guest });
+    await page.route(`${guest}/api/chat`, async (route) => {
+      if (route.request().method() === 'GET') return route.fulfill({ json: { availability: 'server', models: ['xyvora'], webSearch: false } });
+      return route.fulfill({ headers: { 'Content-Type': 'text/event-stream', 'X-Xyvora-Source': 'server' }, body: `data: ${JSON.stringify({ choices: [{ delta: { content: markdown } }] })}\n\ndata: [DONE]\n\n` });
+    });
+    await page.goto(guest + '/');
+    await ask(page, `Test formatted reply at ${width}px`);
+    await page.locator('.hljs-keyword').filter({ hasText: 'const' }).waitFor();
+    await page.getByRole('img', { name: 'Flowchart' }).waitFor();
+    await page.getByRole('table').getByText('Pears', { exact: true }).waitFor();
+    await page.getByRole('button', { name: 'Show source', exact: true }).click();
+    await page.locator('pre code').filter({ hasText: 'A[Plan] --> B[Build]' }).waitFor();
+    await page.getByRole('button', { name: 'Show diagram', exact: true }).click();
+    const code = page.locator('.code-block').filter({ hasText: 'const count' });
+    await code.getByRole('button', { name: 'Copy code block' }).click();
+    await code.getByText('Code copied.', { exact: true }).waitFor({ state: 'attached' });
+    assert.equal(await page.evaluate(() => navigator.clipboard.readText()), 'const count = 7;');
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
+  } finally { await page.close(); }
+}
+
+async function checkPrivateWorkspace(page, device, width) {
+  const member = await (await page.request.get(`${live}/api/account`)).json();
+  if (!member.projects || !member.library) return;
+  const title = `Orchard ${width}`, chat = `Orchard notes ${width}`;
+  const dialog = page.getByRole('dialog');
+  const workspace = '/api/account?section=library';
+  const word = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+  const sheet = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
+  const rels = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+  const pkg = 'http://schemas.openxmlformats.org/package/2006/relationships';
+  await (await sidebarButton(page, 'Projects')).click();
+  await dialog.getByRole('button', { name: 'New project' }).click();
+  await dialog.getByLabel('Name', { exact: true }).fill(title);
+  await dialog.getByLabel('Description').fill('Private orchard recipe notes.');
+  await dialog.getByLabel('Instructions').fill('Use a short checklist.');
+  await dialog.getByLabel('Color').selectOption('teal');
+  await dialog.getByLabel('Icon').selectOption('book');
+  await dialog.getByRole('button', { name: 'Save project' }).click();
+  await dialog.getByRole('heading', { name: title, exact: true }).waitFor();
+  const listResponse = await page.request.get(`${live}/api/account?section=projects`, { headers: { 'X-Xyvora-Account': member.user.id } });
+  const { projects } = await listResponse.json();
+  const project = projects.find(({ name }) => name === title);
+  assert.ok(project);
+  await dialog.locator('input[type=file]').setInputFiles([
+    { name: 'orchard-notes.docx', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', buffer: zipFixture({
+      'word/document.xml': `<w:document xmlns:w="${word}"><w:body><w:p><w:r><w:t>Limerick orchard has forty seven pear trees.</w:t></w:r></w:p></w:body></w:document>`,
+    }) },
+    { name: 'harvest.xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', buffer: zipFixture({
+      'xl/workbook.xml': `<workbook xmlns="${sheet}" xmlns:r="${rels}"><sheets><sheet name="Harvest" sheetId="1" r:id="rId1"/></sheets></workbook>`,
+      'xl/_rels/workbook.xml.rels': `<Relationships xmlns="${pkg}"><Relationship Id="rId1" Type="${rels}/worksheet" Target="worksheets/sheet1.xml"/></Relationships>`,
+      'xl/worksheets/sheet1.xml': `<worksheet xmlns="${sheet}"><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>Pears</t></is></c><c r="B1"><v>47</v></c></row></sheetData></worksheet>`,
+    }) },
+  ]);
+  await dialog.getByText('2 file extracts saved.', { exact: true }).waitFor();
+  await dialog.getByRole('button', { name: /^harvest\.xlsx/ }).click();
+  await dialog.getByText('Pears,47', { exact: true }).waitFor().catch(async (error) => { console.error(await dialog.innerText()); throw error; });
+  await dialog.getByRole('button', { name: 'New project chat' }).click();
+  await page.getByRole('button', { name: title, exact: true }).waitFor();
+  await ask(page, `/calc ${width}+4400`);
+  await page.getByRole('article', { name: 'Calculator response' }).locator('.markdown strong').filter({ hasText: String(width + 4400) }).waitFor();
+  await page.getByRole('button', { name: 'Chat options' }).click();
+  await dialog.getByLabel('Chat title').fill(chat);
+  await dialog.getByRole('button', { name: 'Save changes' }).click();
+  await page.getByRole('button', { name: 'Chat options' }).click();
+  await dialog.getByRole('button', { name: 'Pin chat', exact: true }).click();
+  await page.getByRole('button', { name: 'Chat options' }).click();
+  await dialog.getByRole('button', { name: 'Favorite chat', exact: true }).click();
+  await page.getByRole('button', { name: 'Chat options' }).click();
+  await dialog.getByRole('button', { name: 'Archive chat', exact: true }).click();
+  await page.getByRole('button', { name: 'Restore chat', exact: true }).waitFor();
+  await page.locator('.workspace-profile small').getByText('Cloud history', { exact: true }).waitFor({ state: 'attached' });
+  const archive = await (await device.request.get(`${live}${workspace}&filter=archive`, { headers: { 'X-Xyvora-Account': member.user.id } })).json();
+  assert.equal(archive.entries.find(({ chat: item }) => item.title === chat)?.chat.favorite, true);
+  await device.reload();
+  await device.getByRole('button', { name: 'Your account' }).waitFor();
+  await (await sidebarButton(device, /Search chats/)).click();
+  const palette = device.getByRole('dialog', { name: 'Search chats' });
+  await palette.getByRole('button', { name: 'Files', exact: true }).click();
+  await palette.getByRole('searchbox').fill('Limerick');
+  await palette.getByRole('button', { name: /orchard-notes.docx/ }).waitFor();
+  await palette.getByRole('searchbox').press('ArrowDown');
+  await palette.getByRole('searchbox').press('Enter');
+  await device.getByRole('dialog').getByText('Limerick orchard has forty seven pear trees.', { exact: true }).waitFor();
+  await close(device);
+  await (await sidebarButton(device, /Search chats/)).click();
+  await palette.getByRole('button', { name: 'Archive', exact: true }).click();
+  await palette.getByRole('searchbox').fill(chat);
+  await palette.getByRole('button', { name: new RegExp(chat) }).click();
+  await device.getByRole('button', { name: 'Restore chat', exact: true }).click();
+  await device.locator('.workspace-profile small').getByText('Cloud history', { exact: true }).waitFor({ state: 'attached' });
+  assert.equal(await device.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
+  await (await sidebarButton(page, 'Workspace settings')).click();
+  const syncSetting = (key, value) => page.waitForResponse((response) => response.url() === `${live}/api/account?section=settings` && response.request().postDataJSON()?.settings?.[key] === value && response.ok());
+  await Promise.all([syncSetting('accent', 'lagoon'), dialog.getByLabel('Accent').selectOption('lagoon')]);
+  await Promise.all([syncSetting('density', 'compact'), dialog.getByLabel('Density').selectOption('compact')]);
+  await page.locator('html[data-accent="lagoon"][data-density="compact"]').waitFor({ state: 'attached' });
+  await close(page);
+  const changed = await (await page.request.get(`${live}/api/account`)).json();
+  assert.equal(changed.settings.accent, 'lagoon');
+  await device.getByRole('button', { name: title, exact: true }).click();
+  const projectDialog = device.getByRole('dialog', { name: title });
+  await projectDialog.getByRole('button', { name: 'Delete project', exact: true }).click();
+  await projectDialog.getByRole('button', { name: 'Confirm deletion', exact: true }).click();
+  await device.getByText('Project deleted.', { exact: true }).waitFor();
+  await close(device);
+  const afterward = await (await page.request.get(`${live}${workspace}&q=${encodeURIComponent(chat)}`, { headers: { 'X-Xyvora-Account': member.user.id } })).json();
+  assert.equal(afterward.entries.find(({ chat: item }) => item.title === chat)?.chat.projectId, undefined);
+  console.log(`Workspace ${width}px: project CRUD, DOCX/XLSX extracts, cross-device file/search/archives, theme preferences, delete detaches chats.`);
+}
+
 async function checkAccount(primary, width) {
   const page = await primary.newPage();
   const unique = randomUUID().slice(0, 8);
@@ -501,6 +642,7 @@ async function checkAccount(primary, width) {
     await (await sidebarButton(device, /^Memory/)).click();
     assert.equal(await device.getByRole('textbox', { name: 'Memory note 9' }).inputValue(), 'Fixture 9');
     await close(device);
+    await checkPrivateWorkspace(page, device, width);
 
     await (await sidebarButton(page, 'Background tasks')).click();
     await page.getByLabel('Task prompt').fill(`Outline a short fictional project for device ${width}.`);
@@ -525,6 +667,12 @@ async function checkAccount(primary, width) {
 
     await page.goto(live + '/');
     await page.getByRole('button', { name: 'Your account' }).click();
+    const management = dialog.getByRole('button', { name: 'Manage sessions' });
+    if (await management.isVisible()) {
+      await management.click();
+      await dialog.getByText('This session', { exact: true }).waitFor();
+      await dialog.getByText('Other session', { exact: true }).waitFor();
+    }
     await dialog.getByRole('button', { name: 'Sign out', exact: true }).click();
     await page.getByRole('button', { name: 'Sign in', exact: true }).click();
     assert.equal(await page.getByRole('button', { name: saved, exact: true, includeHidden: true }).count(), 0);
@@ -548,7 +696,7 @@ async function checkAccount(primary, width) {
 try {
   for (const width of [1440, 390]) {
     const context = await makeContext(width);
-    try { await checkGuest(await context.newPage(), width); await checkAccount(context, width); await checkProviderFixtures(context, width); }
+    try { await checkGuest(await context.newPage(), width); await checkAccount(context, width); await checkRichReplies(context, width); await checkProviderFixtures(context, width); }
     finally { await context.close(); }
   }
   assert.deepEqual(errors, [], 'Browser console/page errors');

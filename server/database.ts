@@ -1,17 +1,20 @@
 import type pg from 'pg';
 
 export type SqlValues = (string | number | boolean | null)[];
-export interface PlatformDb {
+export interface PlatformQuery {
   query<T extends Record<string, unknown> = Record<string, unknown>>(sql: string, values?: SqlValues): Promise<T[]>;
+}
+export interface PlatformDb extends PlatformQuery {
+  transaction?<T>(work: (tx: PlatformQuery) => Promise<T>): Promise<T>;
 }
 let pooled: { url: string; db: PlatformDb } | undefined;
 
 export function productionDb(env: Record<string, string | undefined>): PlatformDb | undefined {
-  const url = env.XYVORA_DATABASE_URL?.trim();
+  const url = env.XYVORA_DATABASE_URL?.trim() || '';
   if (!url) return;
   if (pooled?.url === url) return pooled.db;
   let pending: Promise<pg.Pool> | undefined;
-  const db: PlatformDb = { async query(sql, values) {
+  function poolForRequest() {
     if (!/^postgres(?:ql)?:\/\//i.test(url)) throw new Error('Use a PostgreSQL URL for XYVORA_DATABASE_URL.');
     // Chat and unconfigured deployments do not initialize a driver or pool.
     pending ??= import('pg').then(({ default: driver }) => {
@@ -24,8 +27,24 @@ export function productionDb(env: Record<string, string | undefined>): PlatformD
       pool.on('error', () => console.error('[xyvora] The platform database connection closed.'));
       return pool;
     });
-    return (await (await pending).query(sql, values)).rows;
-  } };
+    return pending;
+  }
+  const db: PlatformDb = {
+    async query(sql, values) { return (await (await poolForRequest()).query(sql, values)).rows; },
+    async transaction(work) {
+      const client = await (await poolForRequest()).connect();
+      let discard = false;
+      try {
+        await client.query('begin');
+        const result = await work({ query: async (sql, values) => (await client.query(sql, values)).rows });
+        await client.query('commit');
+        return result;
+      } catch (error) {
+        try { await client.query('rollback'); } catch { discard = true; }
+        throw error;
+      } finally { client.release(discard); }
+    },
+  };
   pooled = { url, db };
   return db;
 }

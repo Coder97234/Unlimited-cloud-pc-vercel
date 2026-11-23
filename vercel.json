@@ -3,8 +3,9 @@
   "cleanUrls": true,
   "trailingSlash": false,
   "framework": "vite",
+  "proxy": { "entrypoint": "middleware.ts" },
   "installCommand": "npm ci --ignore-scripts --no-audit --no-fund && node scripts/vercel-cpu.mjs",
-  "buildCommand": "npm run build && npm run check:site && npm run build:models",
+  "buildCommand": "node --experimental-strip-types scripts/check-update-release.mjs && npm run build && npm run check:site && npm run build:models",
   "outputDirectory": "dist",
   "functions": {
     "api/chat.js": {
@@ -32,6 +33,9 @@
     {
       "source": "/(.*)",
       "headers": [
+        { "key": "Cache-Control", "value": "private, no-store, max-age=0, no-transform" },
+        { "key": "Vercel-CDN-Cache-Control", "value": "no-store" },
+        { "key": "CDN-Cache-Control", "value": "no-store" },
         {
           "key": "X-Content-Type-Options",
           "value": "nosniff"
@@ -52,10 +56,6 @@
         {
           "key": "Content-Type",
           "value": "application/xml; charset=utf-8"
-        },
-        {
-          "key": "Cache-Control",
-          "value": "public, max-age=300, must-revalidate"
         }
       ]
     },
@@ -65,10 +65,6 @@
         {
           "key": "Content-Type",
           "value": "text/plain; charset=utf-8"
-        },
-        {
-          "key": "Cache-Control",
-          "value": "public, max-age=300, must-revalidate"
         }
       ]
     }

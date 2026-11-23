@@ -1,3 +1,4 @@
+import { HOSTED_PROVIDERS } from '../../shared/hosted-models.ts';
 import { XYVORA_NAME, XYVORA_URL } from '../../shared/models.ts';
 import { normalizeSources } from '../../shared/search.ts';
 import { skillName } from '../../shared/skill-catalog.ts';
@@ -18,6 +19,7 @@ export function conversationMarkdown(thread: Thread) {
       const label = thread.mode === 'compare' || answer.source === 'legacy' ? 'Earlier reply'
         : answer.skill ? skillName(answer.skill) : answer.source === 'clock' ? 'Live clock' : answer.source === 'vision' ? 'Image analysis' : MODES[answer.replyMode ?? DEFAULT_MODE].name;
       parts.push(`### ${XYVORA_NAME} · ${label}${answer.source === 'preview' ? ' (sample)' : ''}`);
+      if (answer.hostedModel) parts.push(`Model: ${HOSTED_PROVIDERS[answer.hostedModel.provider]} · ${answer.hostedModel.model}`);
       if (answer.content) parts.push(answer.content);
       if (answer.state !== 'finished') parts.push(`*Reply ${answer.state === 'error' ? 'did not complete' : 'was interrupted'}.*`);
       const links = normalizeSources(answer.sources);

@@ -1,6 +1,9 @@
 import { loadAccount, saveAccountSettings } from './lib/account.ts';
 import { startAnalytics } from './lib/analytics.ts';
 import { currentTheme, setBrowserTheme } from './lib/theme.ts';
+import { styleEarlyAccess } from './lib/early-access.ts';
+
+styleEarlyAccess();
 
 startAnalytics();
 const toggle = document.querySelector<HTMLButtonElement>('[data-theme-switch]');

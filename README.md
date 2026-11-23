@@ -88,6 +88,8 @@ The local preview uses labeled sample replies. Built-in tools, the clock, on-dev
 
 ## Deploy to Vercel
 
+This release defaults to a private update window on Vercel. Set the generated, sensitive `XYVORA_UPDATE_KEY` before building. See the [update-lock runbook](docs/update-lock.md) for preview, production verification, rotation and reopening. The shared preview password is separate from account sign-in.
+
 Use **xyvora-ai** with **xyvora.net** as its production domain. `vercel.json` configures the Vite build and four Node functions. Account, analytics, and workspace functions do not import the native chat engine. If deploying via a source bootstrap, include `api/chat.js`, `api/account.js`, `api/analytics.js`, and `api/workspace.js` before extracting the pinned checkout so function discovery can see them.
 
 - The backend uses a compact Q4_0 GGUF of Apache-2.0 [Qwen 2.5 0.5B Instruct](https://huggingface.co/bartowski/Qwen2.5-0.5B-Instruct-GGUF), pinned to a revision and checksum. No weights are sent to browsers or checked into Git. The function maps its verified weights and reuses only the fixed system-prompt prefix between requests.
@@ -98,7 +100,7 @@ Use **xyvora-ai** with **xyvora.net** as its production domain. `vercel.json` co
 
 - [Terms of Use](https://xyvora.net/terms), [Privacy Policy](https://xyvora.net/privacy), and [Cookie choices](https://xyvora.net/cookies) describe the behavior of this release. Review policies, a private support channel, and retention/backups with the site owner before opening signup or collecting production metrics.
 - [Usage analytics](https://xyvora.net/analytics) shows current registered accounts, distinct opted-in browsers today and over 30 UTC days, returning browsers (two or more active UTC days in that period), and an estimate of concurrent activity (opted-in browsers seen in the last two minutes). It also shows daily counts, not profiles or event logs. The app doesn’t attach identity, URLs, or prompts to the measurement. Without configured storage it displays **unavailable**, not synthetic activity. Opt out in Cookie choices to stop collection and remove identified activity.
-- [Developer API](https://xyvora.net/developers) has curl examples, an interactive API playground, a human-readable [status page](https://xyvora.net/status), and a downloadable [OpenAPI document](https://xyvora.net/openapi.json). The public text endpoint needs no API key and Xyvora does not charge for it. It has request, concurrency, and per-instance abuse limits, not a promise of unbounded capacity or third-party credits. It is intended for server-to-server requests; cross-origin browser calls are not supported.
+- [Developer API](https://xyvora.net/developers) has curl examples, an interactive API playground, a human-readable [status page](https://xyvora.net/status), and a downloadable [OpenAPI document](https://xyvora.net/openapi.json). Outside the update window, the public text endpoint needs no API key and Xyvora does not charge for it. It has request, concurrency, and per-instance abuse limits, not a promise of unbounded capacity or third-party credits. It is intended for server-to-server requests; cross-origin browser calls are not supported.
 
 Guest history stays in the browser; signed-in history syncs to the verified account. On-device tool turns are skipped in future requests. Ordinary replies can send the prompt, limited recent context, extracted attachment text, enabled memory notes, and browser time zone to the server. Don’t put private data in search queries. Source links provide attribution, including Wikipedia’s [CC BY-SA license](https://en.wikipedia.org/wiki/Wikipedia:Copyrights).
 
@@ -204,3 +206,7 @@ Live HTTP on `xyvora.net`, from Vercel's `iad1` region, with the same five short
 The first request was faster in this sample; the median was essentially unchanged. These are small samples with mixed instance reuse, not isolated cold-start measurements. The longer prompt got text in 368 ms and completed in 12.76 s on the release (232 deltas), vs. 3.69 s and 13.42 s before (185 deltas). Different reply lengths and instance startup states make the long samples unsuitable for comparing decode speed.
 
 Production deployment `dpl_46u5HjTc216S1tKfabzPMX77h7q2` passed native Qwen, context reuse, cancellation recovery, translation, and search in its build. The separate report `dpl_4JgTZZnSuDzBwRxsSrDKk6aGvqw6` verified the deployed art bytes, Qwen SSE, identity, calculator, clock, and four live search sources on the public domain. A 390 px dark-mode Chromium run measured **301 ms to first on-screen text and 684 ms to completion** for one short reply, with word-driven motion in both the composer and the real stream. The local desktop and mobile checks also covered partial-word streaming, reduced motion, and narrow composer controls.
+
+### Platform upgrade
+
+See the [staging and activation guide](docs/platform-upgrade.md) for private projects, the paged conversation library, optional Supabase Auth, hosted text model provider setup, and research briefs. The guide lists cutover and rollback constraints and features not yet enabled or implemented.

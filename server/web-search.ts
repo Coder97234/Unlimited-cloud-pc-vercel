@@ -83,3 +83,42 @@ export async function searchWeb(query: string, signal: AbortSignal, requestFetch
   const related = web.status === 'fulfilled' ? web.value.slice(0, 2) : [];
   return normalizeSources([...pages.slice(0, 1), ...related, ...pages.slice(1)]).slice(0, MAX_WEB_SOURCES);
 }
+
+export const WIKI_EXTRACT_URL = 'https://en.wikipedia.org/w/api.php';
+
+// Page text is requested from the publisher's allowlisted API, not by
+// following links from search results. No arbitrary outbound URL requests.
+export async function researchWeb(query: string, signal: AbortSignal, requestFetch = fetch) {
+  const results = await searchWeb(query, signal, requestFetch);
+  const titles = results.flatMap((source) => {
+    if (source.provider !== 'wikipedia') return [];
+    try {
+      const url = new URL(source.url);
+      if (url.origin !== 'https://en.wikipedia.org' || !url.pathname.startsWith('/wiki/')) return [];
+      const title = decodeURIComponent(url.pathname.slice(6)).replace(/_/g, ' ');
+      return title.length > 0 && title.length <= 160 && !/[|\x00-\x1f]/.test(title) ? [title] : [];
+    } catch { return []; }
+  });
+  if (!titles.length) return results;
+  const url = new URL(WIKI_EXTRACT_URL);
+  url.search = new URLSearchParams({ action: 'query', format: 'json', formatversion: '2', prop: 'extracts', exintro: '1', explaintext: '1', exlimit: '3', exchars: '1200', titles: titles.join('|') }).toString();
+  try {
+    const raw = await readJson(url, AbortSignal.any([signal, AbortSignal.timeout(4_000)]), requestFetch) as { query?: { pages?: unknown } };
+    if (!Array.isArray(raw?.query?.pages)) return results;
+    const pages = new Map<string, string>();
+    for (const page of raw.query.pages.slice(0, 3)) {
+      if (page?.missing === true || typeof page?.title !== 'string' || typeof page?.extract !== 'string' || page.extract.trim().length < 60) continue;
+      pages.set(page.title.toLowerCase().replace(/ /g, '_'), page.extract);
+    }
+    const output = normalizeSources(results.map((source) => {
+      if (source.provider !== 'wikipedia') return source;
+      const slug = decodeURIComponent(new URL(source.url).pathname.slice(6)).toLowerCase().replace(/ /g, '_');
+      const excerpt = pages.get(slug);
+      return excerpt ? { ...source, excerpt, evidence: 'retrieved' } : source;
+    }));
+    return output.sort((a, b) => Number(b.evidence === 'retrieved') - Number(a.evidence === 'retrieved'));
+  } catch (error) {
+    signal.throwIfAborted();
+    return results; // The UI still marks these as search snippets, not fetched pages.
+  }
+}

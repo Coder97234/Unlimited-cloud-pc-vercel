@@ -1,9 +1,15 @@
 import { DEFAULT_MODE, isReplyMode, modeContext, MODE_IDS } from '../shared/modes.ts';
+import { isModelChoice } from '../shared/hosted-models.ts';
+import type { ModelChoice } from '../shared/hosted-models.ts';
+import type { RoutedGenerate } from './hosted-models.ts';
+import { isProjectId, projectPrompt } from '../shared/projects.ts';
+import type { ProjectContext } from '../shared/projects.ts';
+import { ToolError } from './workspace-http.ts';
 import { checkedCreatorStream, mentionsCreator, verifiedTeamReply } from '../shared/creator-policy.ts';
 import { brandedStream } from '../shared/branding.ts';
 import { ASSISTANT_PROFILE, DEFAULT_MODEL, MAX_ATTACHMENT, MAX_CONTEXT, MAX_MESSAGES, MAX_PROMPT, REPLY_SKILL_HEADER, REPLY_SOURCE_HEADER, withAttachment } from '../shared/models.ts';
 import type { Availability, ChatMessage, ReplySource, TextAttachment } from '../shared/models.ts';
-import { allowsSearchToggle, explicitSearchQuery, MAX_SEARCH_QUERY } from '../shared/search.ts';
+import { allowsSearchToggle, explicitSearchQuery, isResearchPrompt, MAX_SEARCH_QUERY } from '../shared/search.ts';
 import { parseMemoryNotes, preferencesContext } from '../shared/memory.ts';
 import { readSkillCommand, SKILL_IDS, skillAvailable } from '../shared/skill-catalog.ts';
 import type { SkillResultId } from '../shared/skill-catalog.ts';
@@ -76,9 +82,9 @@ function parseAttachment(value: unknown): TextAttachment | undefined {
 
 export function parseChat(input: unknown) {
   if (typeof input !== 'object' || input === null) throw new InvalidInput('A message is required.');
-  const { model = DEFAULT_MODEL, mode = DEFAULT_MODE, messages, timeZone = 'UTC', searchQuery, attachment: rawAttachment, memory: rawMemory } = input as Record<string, unknown>;
+  const { model = DEFAULT_MODEL, mode = DEFAULT_MODE, messages, timeZone = 'UTC', searchQuery, attachment: rawAttachment, memory: rawMemory, projectId, projectFiles } = input as Record<string, unknown>;
   // Accept requests from the preceding client during rollout, but never advertise the old ID.
-  if (model !== DEFAULT_MODEL && model !== 'qwen-lite') throw new InvalidInput('Send a supported Xyvora model ID.');
+  if (!isModelChoice(model) && model !== 'qwen-lite') throw new InvalidInput('Send a supported Xyvora model ID.');
   if (!isReplyMode(mode)) throw new InvalidInput('Select a supported reply mode.');
   if (!validTimeZone(timeZone)) throw new InvalidInput('Send a valid IANA time zone, or omit it to use UTC.');
   if (!Array.isArray(messages) || messages.length === 0 || messages.length > MAX_MESSAGES || messages.length % 2 === 0) {
@@ -108,7 +114,10 @@ export function parseChat(input: unknown) {
     }
     query = rawQuery.replace(/\s+/g, ' ').trim();
   }
-  return { messages: modeContext(cleaned, mode), timeZone, query, mode, ...(memory.length && { memory }), ...(attachment && { attachment }) };
+  if (projectId !== undefined && (!isProjectId(projectId) || typeof projectFiles !== 'boolean')) throw new InvalidInput('Choose a valid project.');
+  if (projectId === undefined && projectFiles !== undefined) throw new InvalidInput('Choose a project before using project files.');
+  return { ...(typeof projectId === 'string' && { project: { id: projectId, includeFiles: projectFiles === true } }),
+    ...(model !== DEFAULT_MODEL && model !== 'qwen-lite' && { model }), messages: modeContext(cleaned, mode), timeZone, query, mode, ...(memory.length && { memory }), ...(attachment && { attachment }) };
 }
 
 // Best-effort limit per function instance; this is not a shared public quota.
@@ -137,14 +146,17 @@ interface ChatOptions {
   limit?: boolean;
   generate?: ServerGenerate;
   search?: WebSearch;
+  research?: WebSearch;
   now?: () => Date;
+  hosted?: (request: Request, model: Exclude<ModelChoice, 'xyvora'>) => Promise<RoutedGenerate>;
+  projectContext?: (request: Request, id: string, query: string, includeFiles: boolean) => Promise<ProjectContext>;
 }
 
 export async function handleChat(request: Request, options: ChatOptions = {}): Promise<Response> {
   const availability: Availability = options.generate ? 'server' : options.preview ? 'preview' : 'unavailable';
   if (request.method === 'GET') {
     const webSearch = !!(options.search && options.generate);
-    return json({ assistant: ASSISTANT_PROFILE, availability, models: availability === 'unavailable' ? [] : [DEFAULT_MODEL], webSearch, modes: MODE_IDS,
+    return json({ assistant: ASSISTANT_PROFILE, availability, ...(options.research && options.generate && { research: true }), models: availability === 'unavailable' ? [] : [DEFAULT_MODEL], webSearch, modes: MODE_IDS,
       skills: SKILL_IDS.filter((id) => skillAvailable(id, !!options.generate, webSearch)) });
   }
   if (request.method !== 'POST') return json({ error: 'Method not allowed.' }, 405, { Allow: 'GET, POST' });
@@ -162,6 +174,27 @@ export async function handleChat(request: Request, options: ChatOptions = {}): P
   const ip = request.headers.get('x-vercel-forwarded-for')?.split(',')[0]?.trim().slice(0, 64) || 'unknown';
   if (options.limit && !mayRequest(ip, !!input.query)) return json({ error: 'Too many requests. Wait a minute and try again.' }, 429, { 'Retry-After': '60' });
 
+  let hosted: RoutedGenerate | undefined;
+  if (input.model) {
+    if (!options.hosted) return json({ error: 'Hosted models are unavailable in this workspace.' }, 503);
+    try { hosted = await options.hosted(request, input.model); }
+    catch (error) { return json({ error: error instanceof ToolError ? error.message : 'Could not authorize the selected model.' }, error instanceof ToolError ? error.status : 503); }
+  }
+  let project: string | undefined;
+  if (input.project) {
+    if (!options.projectContext) return json({ error: 'Project context is unavailable.' }, 503);
+    try {
+      const context = await options.projectContext(request, input.project.id, prompt, input.project.includeFiles);
+      const safe = {
+        instructions: mentionsCreator(context.instructions) ? '' : context.instructions,
+        excerpts: context.excerpts.filter(({ name, text }) => !mentionsCreator(`${name}\n${text}`)),
+      };
+      if (options.generate || hosted) project = projectPrompt(safe);
+    } catch (error) {
+      return json({ error: error instanceof ToolError ? error.message : 'Could not load the project. Try again.' }, error instanceof ToolError ? error.status : 503);
+    }
+  }
+  if (request.signal.aborted) return new Response(null, { status: 499 });
   const now = options.now?.() ?? new Date();
   const team = teamAnswerSkill(prompt);
   if (team || (input.query && mentionsCreator(input.query))) return instantReply(team?.text ?? verifiedTeamReply, 'skill', 'about');
@@ -187,14 +220,16 @@ export async function handleChat(request: Request, options: ChatOptions = {}): P
     messages[messages.length - 1] = { role: 'user', content: modelPrompt };
   }
 
-  const { generate, search } = options;
-  if (input.query && (!search || !generate)) return json({ error: 'Live web search is not available in this environment.', code: 'SEARCH_UNAVAILABLE' }, 503);
-  if (!generate) {
+  const { generate } = options;
+  const report = !!input.query && isResearchPrompt(prompt);
+  const search = report ? options.research : options.search;
+  if (input.query && (!search || (!generate && !hosted))) return json({ error: 'Live web search is not available in this environment.', code: 'SEARCH_UNAVAILABLE' }, 503);
+  if (!generate && !hosted) {
     if (options.preview) return reply(previewResponse(modelPrompt, request.signal, input.mode), 'preview');
     return json({ error: 'Xyvora replies are unavailable. Please try again.', code: 'MODEL_UNAVAILABLE' }, 503);
   }
 
-  const task = !input.query && readSkillCommand(prompt)?.id === 'translate' ? 'translate' : undefined;
+  const task: 'translate' | undefined = !input.query && readSkillCommand(prompt)?.id === 'translate' ? 'translate' : undefined;
   const notes = input.memory?.filter((note) => !mentionsCreator(note));
   const preferences = !task && notes?.length
     ? preferencesContext(notes, MAX_CONTEXT - messages.reduce((sum, message) => sum + message.content.length, 0))
@@ -203,7 +238,7 @@ export async function handleChat(request: Request, options: ChatOptions = {}): P
   return reply(inferenceStream(async (signal, output) => {
     const sources = input.query && search ? (await search(input.query, signal)).filter(({ title, excerpt }) => !mentionsCreator(`${title}\n${excerpt ?? ''}`)) : undefined;
     if (sources) {
-      output.sources(sources.map(({ title, url, provider }) => ({ title, url, provider })));
+      output.sources(sources.map(({ title, url, provider, evidence }) => ({ title, url, provider, ...(evidence && { evidence }) })));
       if (sources.length === 0) {
         output.text('I couldn’t find relevant web results. Try a more specific search, or turn off Web search to ask Xyvora directly.');
         return;
@@ -213,9 +248,12 @@ export async function handleChat(request: Request, options: ChatOptions = {}): P
     const checked = checkedCreatorStream(output.text, () => stop.abort());
     const branded = brandedStream(checked.text);
     try {
-      await generate(messages, AbortSignal.any([signal, stop.signal]), branded.text, { sources, task,
+      const context = { sources, task, report, project: task ? undefined : project,
         ...(preferences && !mentionsCreator(preferences) && { preferences }),
-        clock: task ? undefined : contextualClock(prompt, input.timeZone, now), mode: input.mode });
+        clock: task ? undefined : contextualClock(prompt, input.timeZone, now), mode: input.mode };
+      const cancellation = AbortSignal.any([signal, stop.signal]);
+      if (hosted) await hosted(messages, cancellation, branded.text, context, output.model);
+      else await generate!(messages, cancellation, branded.text, context);
     } catch (error) {
       if (!stop.signal.aborted || signal.aborted) throw error;
     }

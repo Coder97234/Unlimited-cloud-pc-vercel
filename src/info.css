@@ -133,3 +133,7 @@ button.info-button:focus-visible, .days-details summary:focus-visible { outline:
 .service-list > div { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 4px 12px; border-bottom: 1px solid var(--line); padding: 11px 0; }
 .service-list dt { font-weight: 650; }
 .service-list dd { margin: 0; }
+
+:root[data-edition='early'] { --paper: #faf8f3; --surface: #fffdf9; --ink: #2f2b27; --sub: #62574b; --line: #e8e0d5; --accent: #914931; --accent-soft: #f4e4d7; --tint: #f2ece2; --shadow: 0 9px 26px #50392112; }
+:root[data-edition='early'][data-theme='dark'] { --paper: #25231f; --surface: #302c27; --ink: #eee6da; --sub: #c9bcab; --line: #574b3e; --accent: #e7a985; --accent-soft: #452f26; --tint: #2c2823; --shadow: 0 9px 26px #0003; }
+:root[data-edition='early'] .info-hero h1 { font-family: Georgia,'Times New Roman',serif; font-weight: 400; letter-spacing: -.055em; }

@@ -1,16 +1,17 @@
+import { HOSTED_PROVIDERS } from '../../shared/hosted-models.ts';
 import { AlertCircle, ArrowUpRight, Check, Clipboard, Clock3, GitBranch, Globe, Image, Paperclip, Pencil, RotateCcw, ShieldCheck, Zap } from 'lucide-react';
-import { memo, useEffect, useRef, useState } from 'react';
+import { lazy, memo, Suspense, useEffect, useRef, useState } from 'react';
 import { XYVORA_NAME } from '../../shared/models.ts';
 import { skillName } from '../../shared/skill-catalog.ts';
 import { DEFAULT_MODE, MODES } from '../../shared/modes.ts';
 import type { Answer, Thread, Turn } from '../lib/history.ts';
 import { hasCompletedWord, floatMascot } from '../lib/mascot-motion.ts';
 import { Mascot } from './Brand.tsx';
-import MarkdownAnswer from './MarkdownAnswer.tsx';
+
 
 // Render completed replies directly, including instant tools whose whole
 // response arrives in one frame. Don’t fall back to raw Markdown syntax.
-const AnswerText = memo(MarkdownAnswer);
+const AnswerText = memo(lazy(() => import('./MarkdownAnswer.tsx')));
 
 function AnswerCard({ answer, archived, searching, onRetry, onBranch, onAlert }: {
   answer: Answer; archived: boolean; searching: boolean; onRetry?: () => void; onBranch?: () => void;
@@ -41,9 +42,10 @@ function AnswerCard({ answer, archived, searching, onRetry, onBranch, onAlert }:
       {vision ? <span className="model-icon tint-sky"><Image size={17} /></span> : clock ? <span className="model-icon tint-sky"><Clock3 size={17} /></span> : instant ? <span className="model-icon tint-violet"><Zap size={17} /></span>
         : <Mascot className="reply-mark" motionRef={historical ? undefined : mascot} />}
       <strong>{name}</strong>{badge && <span className="answer-tag">{badge}</span>}
+      {answer.hostedModel && <span className="answer-tag hosted-model-tag" title={answer.hostedModel.model}>{HOSTED_PROVIDERS[answer.hostedModel.provider]} · {answer.hostedModel.model}</span>}
       {answer.source === 'preview' && <span className="answer-tag">Sample</span>}
     </header>
-    {answer.content && <AnswerText content={answer.content} trustedLinksOnly={vision || searching || sources.length > 0} />}
+    {answer.content && <Suspense fallback={<p className="form-hint" role="status">Formatting reply…</p>}><AnswerText working={working} content={answer.content} trustedLinksOnly={vision || searching || sources.length > 0} /></Suspense>}
     {working && !answer.content && <div className="answer-loading" role="status">
       <span className="typing-dots" aria-hidden="true"><i /><i /><i /></span><span>{vision ? 'Analyzing image' : searching && !clock ? (sources.length ? 'Writing with sources' : 'Searching the web') : 'Preparing a reply'}</span>
     </div>}
@@ -51,7 +53,7 @@ function AnswerCard({ answer, archived, searching, onRetry, onBranch, onAlert }:
       <div className="web-sources-heading"><Globe size={15} /><strong>Web sources</strong></div>
       <ol>{sources.map((source, index) => <li key={source.url}>
         <a href={source.url} target="_blank" rel="noopener noreferrer">
-          <span className="source-number">{index + 1}</span><span className="source-info"><strong>{source.title}</strong><small>{new URL(source.url).hostname}</small></span><ArrowUpRight size={14} />
+          <span className="source-number">{index + 1}</span><span className="source-info"><strong>{source.title}</strong><small>{new URL(source.url).hostname} · {source.evidence === 'retrieved' ? 'Retrieved introduction' : 'Search snippet'}</small></span><ArrowUpRight size={14} />
         </a>
       </li>)}</ol>
       <div className="web-source-credits">
@@ -79,7 +81,7 @@ export function Transcript({ thread, busy, onRetry, onFork, onAlert }: {
   thread: Thread; busy: boolean; onRetry?: () => void; onFork?: (turn: Turn, kind: 'edit' | 'reply') => void; onAlert: (message: string) => void;
 }) {
   return <div className={`transcript${thread.mode === 'compare' ? ' transcript-compare' : ''}`} aria-label="Conversation">
-    {thread.turns.map((turn, index) => <section className="turn" key={turn.id}>
+    {thread.turns.map((turn, index) => <section className="turn" key={turn.id} id={`xyvora-turn-${turn.id}`} tabIndex={-1}>
       <div className="user-row">
         {onFork && !busy && <button type="button" className="bare-icon prompt-edit" aria-label="Edit prompt in a new branch" title="Edit prompt in a new branch" onClick={() => onFork(turn, 'edit')}><Pencil size={15} /></button>}
         <div className="user-message"><p>{turn.prompt}</p>

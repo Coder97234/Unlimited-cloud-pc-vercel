@@ -1,3 +1,4 @@
+import { PUBLIC_CREDENTIALS } from './lib/early-access.ts';
 import type { AnalyticsReport } from '../shared/analytics.ts';
 import { analyticsEnabled, setAnalytics } from './lib/analytics.ts';
 
@@ -15,7 +16,7 @@ async function refresh() {
   const button = $('refresh-metrics') as HTMLButtonElement | null;
   if (button) button.disabled = true;
   try {
-    const response = await fetch('/api/analytics', { cache: 'no-store', credentials: 'omit', signal: AbortSignal.timeout(8_000) });
+    const response = await fetch('/api/analytics', { cache: 'no-store', credentials: PUBLIC_CREDENTIALS, signal: AbortSignal.timeout(8_000) });
     const data = await response.json();
     if (!response.ok || !data.available || !data.report) {
       showMetrics(false);
