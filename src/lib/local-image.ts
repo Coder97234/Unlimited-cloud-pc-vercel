@@ -2,9 +2,9 @@ export const ART_STYLES = ['Aurora', 'Orbit', 'Terrain'] as const;
 export type ArtStyle = typeof ART_STYLES[number];
 
 const palettes = [
-  ['#0d0929', '#25105d', '#8b54ff', '#ef87e7', '#e3d7ff'],
+  ['#24150b', '#4d2613', '#da6e27', '#ffb565', '#ffe4bd'],
   ['#071b24', '#083846', '#22beaa', '#9bffd7', '#e0fff5'],
-  ['#151025', '#58305a', '#ef755a', '#ffc093', '#fff2d8'],
+  ['#251712', '#654035', '#ef755a', '#ffc093', '#fff2d8'],
   ['#061220', '#101f55', '#4783ff', '#80e0ff', '#dfedff'],
 ] as const;
 

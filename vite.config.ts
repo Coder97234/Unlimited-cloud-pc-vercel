@@ -9,8 +9,9 @@ import react from '@vitejs/plugin-react';
 import { defineConfig, loadEnv } from 'vite';
 import type { Connect, Plugin } from 'vite';
 import { handleChat } from './server/chat.ts';
-import { generateOnServer } from './server/inference.ts';
-import { researchWeb, searchWeb } from './server/web-search.ts';
+import { bundledModelAvailable, generateOnServer } from './server/inference.ts';
+import { localModelsFrom } from './server/local-models.ts';
+import { searxngSearch } from './server/searxng.ts';
 import { handleWorkspace } from './server/workspace.ts';
 import { handleAnalytics } from './server/analytics.ts';
 import { productionDb } from './server/database.ts';
@@ -19,9 +20,9 @@ import { handleJobs } from './server/jobs.ts';
 import { workTextQueue } from './server/job-worker.ts';
 import type { SendAccountMail } from './server/account-email.ts';
 import { accountConfig, handleAccount, hostedModelsFor, projectContextFor } from './server/account.ts';
+import type { AccountConfig } from './server/account.ts';
 import { workspaceConfig } from './server/workspace-connections.ts';
 import { XYVORA_URL } from './shared/site.ts';
-import { WORKSPACE_PLUGINS_ENABLED } from './shared/workspace-tools.ts';
 import { checkUpdateLock, updateCacheHeaders, updateLocked } from './server/update-lock.ts';
 import { PUBLIC_PAGES, publicPages } from './server/public-pages.ts';
 
@@ -37,10 +38,17 @@ function apiInDevelopment(env: Record<string, string | undefined>): Plugin {
     await mkdir(dir, { recursive: true, mode: 0o700 });
     await writeFile(`${dir}/${randomUUID()}.json`, JSON.stringify(message), { mode: 0o600, flag: 'wx', signal });
   } : undefined;
-  const chat = { generate: realServerModel ? generateOnServer : undefined, search: realServerModel ? searchWeb : undefined, research: realServerModel && env.XYVORA_ENABLE_RESEARCH === '1' ? researchWeb : undefined, preview: !realServerModel, limit: realServerModel };
+  const search = searxngSearch(env);
+  const localModels = localModelsFrom(env);
+  const chatOptions = async () => ({ generate: realServerModel && await bundledModelAvailable() ? generateOnServer : undefined,
+    localModels, search, research: search, preview: !realServerModel, limit: realServerModel || !!localModels });
+  async function chatForRequest(request: Request, accounts?: AccountConfig) {
+    const chat = await chatOptions();
+    return handleChat(request, { ...chat, projectContext: projectContextFor(accounts), hosted: hostedModelsFor(accounts, chat.generate) });
+  }
   const deployed = env.VERCEL === '1' || !!env.VERCEL_ENV;
   const locked = updateLocked(env, deployed);
-  const settings = WORKSPACE_PLUGINS_ENABLED ? workspaceConfig(env) : undefined;
+  const settings = workspaceConfig(env);
   const middleware: Connect.NextHandleFunction = (incoming, outgoing, next) => {
     const path = incoming.url?.split('?')[0];
     const api = path === '/api/chat' || path === '/api/workspace' || path === '/api/account' || path === '/api/analytics';
@@ -69,9 +77,9 @@ function apiInDevelopment(env: Record<string, string | undefined>): Plugin {
       const accounts = local && !localOrigin ? undefined : accountConfig(identityEnv, db, localOrigin, localMail);
       const response = gate ?? (path === '/api/account' ? await handleAccount(request, accounts)
         : path === '/api/analytics' ? await handleAnalytics(request, accounts?.origin ?? env.XYVORA_ACCOUNT_ORIGIN ?? XYVORA_URL, accounts?.db)
-        : path === '/api/workspace' ? await handleWorkspace(request, settings, { limit: false })
+        : path === '/api/workspace' ? await handleWorkspace(request, settings, { limit: !local, accounts })
         : url.searchParams.get('work') === 'jobs' ? await handleJobs(request, accounts)
-        : await handleChat(request, { ...chat, projectContext: projectContextFor(accounts), hosted: hostedModelsFor(accounts, chat.generate) }));
+        : await chatForRequest(request, accounts));
       outgoing.statusCode = response.status;
       response.headers.forEach((value, key) => { if (key !== 'set-cookie') outgoing.setHeader(key, value); });
       const cookies = response.headers.getSetCookie();
@@ -90,7 +98,7 @@ function apiInDevelopment(env: Record<string, string | undefined>): Plugin {
     if (!local || !db) return;
     const controller = new AbortController();
     httpServer?.once('close', () => controller.abort());
-    void workTextQueue(db, XYVORA_URL, chat, controller.signal);
+    void chatOptions().then((chat) => workTextQueue(db, XYVORA_URL, chat, controller.signal));
   }
   return {
     name: 'xyvora-workspace-development',

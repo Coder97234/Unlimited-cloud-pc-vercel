@@ -1,3 +1,4 @@
+import { chatTitle } from '../../shared/history.ts';
 import { Archive, ArchiveRestore, Copy, Pin, PinOff, Star, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import type { Project } from '../../shared/projects.ts';
@@ -11,12 +12,12 @@ export function ChatOptionsDialog({ thread, projects, canDuplicate, onSave, onDu
   const [title, setTitle] = useState(thread.title);
   const [projectId, setProjectId] = useState(projects?.some((project) => project.id === thread.projectId) ? thread.projectId ?? '' : '');
   return <Dialog title="Chat options" subtitle={thread.title} onClose={onClose}>
-    <form className="project-form" onSubmit={(event) => { event.preventDefault(); onSave({ title: title.trim(), ...(projects && { projectId: projectId || undefined }) }); }}>
+    <form className="project-form" onSubmit={(event) => { event.preventDefault(); const name = chatTitle(title); if (!name) return; onSave({ title: name, ...(projects && { projectId: projectId || undefined }) }); }}>
       <label className="field-label">Chat title<input className="plugin-input" value={title} required maxLength={100} data-dialog-focus onChange={(event) => setTitle(event.target.value)} /></label>
       {projects && <label className="field-label">Project<select className="plugin-input" value={projectId} onChange={(event) => setProjectId(event.target.value)}>
         <option value="">No project</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
       </select></label>}
-      <div className="dialog-actions"><button type="submit" className="primary-button" disabled={!title.trim()}>Save changes</button></div>
+      <div className="dialog-actions"><button type="submit" className="primary-button" disabled={!chatTitle(title)}>Save changes</button></div>
     </form>
     <div className="chat-option-actions" aria-label="Conversation actions">
       <button type="button" className="secondary-button" onClick={() => onSave({ pinned: thread.pinned ? undefined : true })}>{thread.pinned ? <PinOff size={15} /> : <Pin size={15} />}{thread.pinned ? 'Unpin chat' : 'Pin chat'}</button>

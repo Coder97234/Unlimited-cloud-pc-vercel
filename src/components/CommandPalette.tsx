@@ -5,6 +5,7 @@ import type { Project } from '../../shared/projects.ts';
 import type { Thread } from '../lib/history.ts';
 import { listLibrary } from '../lib/library.ts';
 import { searchProjectFiles } from '../lib/projects.ts';
+import { useLabels } from '../lib/labels.ts';
 import { Dialog } from './Dialog.tsx';
 
 export type PaletteCommand = { id: string; label: string; keywords: string; run: () => void };
@@ -17,12 +18,13 @@ const snippet = (text: string, term: string) => {
   const start = Math.max(0, compact.toLowerCase().indexOf(term) - 28);
   return (start ? '…' : '') + compact.slice(start, start + 118) + (compact.length > start + 118 ? '…' : '');
 };
-export function CommandPalette({ threads, projects, accountId, library, commands, recent, onRemember, onClose, onThread, onProject }: {
-  threads: Thread[]; projects?: Project[]; accountId?: string; library: boolean; commands: PaletteCommand[]; recent: string[];
+export function CommandPalette({ threads, projects, accountId, library, commands, recent, chatsOnly, onRemember, onClose, onThread, onProject }: {
+  threads: Thread[]; projects?: Project[]; accountId?: string; library: boolean; commands: PaletteCommand[]; recent: string[]; chatsOnly?: boolean;
   onRemember: (query: string) => void; onClose: () => void; onThread: (chat: Thread, turn?: string) => void; onProject: (id: string, file?: string) => void;
 }) {
+  const t = useLabels();
   const [query, setQuery] = useState('');
-  const [filter, setFilter] = useState<Filter>('All');
+  const [filter, setFilter] = useState<Filter>(chatsOnly ? 'Chats' : 'All');
   const [selected, setSelected] = useState(-1);
   const [cloud, setCloud] = useState<{ key: string; entries?: LibraryEntry[]; error?: string }>();
   const [files, setFiles] = useState<{ query: string; items?: FileMatch[]; error?: string }>();
@@ -101,8 +103,8 @@ export function CommandPalette({ threads, projects, accountId, library, commands
   const visible = list.slice(0, limit);
   const run = (item: Match) => { if (query.trim()) onRemember(query.trim()); item.run(); };
   const busy = (withFiles && files?.query !== term) || (withLibrary && cloud?.key !== searchKey);
-  return <Dialog title="Search chats" subtitle="Find workspace content or run a command. Use the arrow keys and Enter to open a result." className="palette-dialog" onClose={onClose}>
-    <label className="search-field"><Search size={18} /><input type="search" value={query} maxLength={100} onChange={(event) => { setQuery(event.target.value); setSelected(-1); setFiles(undefined); }} placeholder="Search chats, messages, actions…" aria-label="Search workspace" data-dialog-focus
+  return <Dialog title={t('searchChats')} subtitle="Find workspace content or run a command. Use the arrow keys and Enter to open a result." className="palette-dialog" onClose={onClose}>
+    <label className="search-field"><Search size={18} /><input type="search" value={query} maxLength={100} onChange={(event) => { setQuery(event.target.value); setSelected(-1); setFiles(undefined); }} placeholder={t('searchChats')} aria-label="Search workspace" data-dialog-focus
       onKeyDown={(event) => {
         if (event.nativeEvent.isComposing || !visible.length) return;
         if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {

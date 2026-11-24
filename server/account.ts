@@ -1,3 +1,5 @@
+import { clearAppConnectionCookies } from './workspace-connections.ts';
+import type { ConnectionBinding } from './workspace-connections.ts';
 import { hostedConfigFrom, modelRouter } from './hosted-models.ts';
 import type { HostedConfig } from './hosted-models.ts';
 import type { ModelChoice } from '../shared/hosted-models.ts';
@@ -68,6 +70,24 @@ export async function verifiedAccount(request: Request, config: AccountConfig): 
   const [user] = await config.db.query<PublicAccount>(`select a.id, a.name, a.email from xyvora_sessions s join xyvora_accounts a on a.id = s.account_id where s.digest = $1 and s.expires_ms > $2 and s.credential_version = a.credential_version`, [digest(session), Date.now()]);
   return user ?? null;
 }
+// The browser's OAuth grant must belong to this still-valid Xyvora session.
+// The pending state is consumed atomically before any provider token exchange.
+export async function connectionBindingFor(request: Request, config: AccountConfig, callback: boolean): Promise<ConnectionBinding> {
+  const user = await verifiedAccount(request, config);
+  const token = readCookie(request, config, 'session');
+  if (!user || !token) throw new ToolError('Sign in to Xyvora to connect apps.', 401);
+  if (!callback && request.headers.get('x-xyvora-account') !== user.id) throw new ToolError('Your account changed. Refresh and try again.', 409);
+  const session = digest(token);
+  return { session,
+    record: async (state, provider, expires) => {
+      await config.db.query('delete from xyvora_auth_attempts where expires_ms <= $1', [Date.now()]);
+      await config.db.query('insert into xyvora_auth_attempts(digest,provider,verifier,expires_ms) values($1,$2,$3,$4)', [digest(state), `app:${provider}`, session, expires]);
+    },
+    consume: async (state, provider) => (await config.db.query('delete from xyvora_auth_attempts where digest=$1 and provider=$2 and verifier=$3 and expires_ms>$4 returning digest',
+      [digest(state), `app:${provider}`, session, Date.now()])).length === 1,
+  };
+}
+
 // This is the only bridge from chat generation to private project storage.
 export function projectContextFor(config: AccountConfig | undefined) {
   if (!config?.projects) return;
@@ -110,6 +130,7 @@ async function createSession(headers: Headers, request: Request, config: Account
     [digest(session), account.id, now + 30 * day, old ? digest(old) : null, expectedVersion ?? null]);
   if (!created.length) throw new ToolError('Sign in again with your current credentials.', 401);
   writeCookie(headers, config, 'session', session, 30 * 86_400);
+  clearAppConnectionCookies(request, headers);
 }
 
 let resetAt = 0;
@@ -307,13 +328,14 @@ export async function handleAccount(request: Request, config: AccountConfig | un
       return json({ providers, passwords: config.passwords, background, user,
         ...(config.supabase && (config.supabase.passwords || config.supabase.providers.length) && { supabase: { origin: config.supabase.origin, providers: config.supabase.providers, passwords: config.supabase.passwords } }),
         ...(config.passwords && config.emailVerification === 'code' && { emailVerification: 'code' as const }),
-        ...(user && { settings: await readPreferences(config.db, user.id), ...(config.projects && { projects: true }), ...(config.library && { library: true }), ...(config.sessions && { sessions: true }), ...(config.hosted && { hostedModels: config.hosted.models.map(({ provider, model }) => ({ provider, model })) }) }) } satisfies AccountStatus);
+        ...(user && { settings: await readPreferences(config.db, user.id), ...(config.projects && { projects: true }), ...(config.library && { library: true }), ...(config.sessions && { sessions: true }) }) } satisfies AccountStatus);
     }
     if (input?.action === 'sign-out' && !section) {
       if (user && request.headers.get('x-xyvora-account') !== user.id) throw new ToolError('Your account changed. Refresh and try again.', 409);
       const session = readCookie(request, config, 'session'), attempt = readCookie(request, config, 'oauth');
       if (session) await config.db.query('delete from xyvora_sessions where digest = $1', [digest(session)]);
       if (attempt) await config.db.query('delete from xyvora_auth_attempts where digest = $1', [digest(attempt)]);
+      clearAppConnectionCookies(request, headers);
       writeCookie(headers, config, 'session', '', 0);
       writeCookie(headers, config, 'oauth', '', 0);
       return json({ signedOut: true });
@@ -328,6 +350,7 @@ export async function handleAccount(request: Request, config: AccountConfig | un
       }
       await config.db.query(`with removed as (delete from xyvora_accounts where id=$1 returning provider, subject)
         delete from xyvora_email_links l using removed r where r.provider='password' and l.email=r.subject`, [user.id]);
+      clearAppConnectionCookies(request, headers);
       writeCookie(headers, config, 'session', '', 0);
       writeCookie(headers, config, 'oauth', '', 0);
       return json({ deleted: true });
@@ -376,7 +399,7 @@ export async function handleAccount(request: Request, config: AccountConfig | un
     if (section !== 'memory' || input?.action !== 'save-memory') throw new ToolError('Unknown account action.');
     const profile = parseMemory(input.profile, true);
     if (!profile) throw new ToolError('Check the size and number of your memory notes.');
-    if (!profile.enabled && !profile.notes.length) await config.db.query('delete from xyvora_memory where account_id = $1', [user.id]);
+    if (profile.enabled && !profile.notes.length) await config.db.query('delete from xyvora_memory where account_id = $1', [user.id]);
     else await config.db.query('insert into xyvora_memory (account_id, profile) values ($1,$2::jsonb) on conflict (account_id) do update set profile = excluded.profile', [user.id, JSON.stringify(profile)]);
     return json({ profile });
   } catch (error) {

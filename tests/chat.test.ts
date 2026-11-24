@@ -1,11 +1,12 @@
 import { MODE_IDS } from '../shared/modes.ts';
 import assert from 'node:assert/strict';
 import { ASSISTANT_PROFILE, DEFAULT_MODEL } from '../shared/models.ts';
-import { SKILL_IDS } from '../shared/skill-catalog.ts';
+import { SKILL_IDS, skillAvailable } from '../shared/skill-catalog.ts';
 import { test } from 'node:test';
 import vercelChat from '../server/vercel-chat.ts';
 import { checkUpdateLock, makeUpdateKey } from '../server/update-lock.ts';
 import { handleChat, parseChat } from '../server/chat.ts';
+import { bundledModelAvailable } from '../server/inference.ts';
 import { InferenceError } from '../server/inference-stream.ts';
 import { WIBY_SEARCH_URL, WIKI_SEARCH_URL, searchWeb } from '../server/web-search.ts';
 import { buildMessages, loadThreads } from '../src/lib/history.ts';
@@ -45,9 +46,11 @@ test('a missing backend never looks like successful inference', async () => {
   assert.equal((await reply.json()).code, 'MODEL_UNAVAILABLE');
 });
 
-test('Unlocked Vercel chat advertises only Xyvora identity, modes, and built-in tools, regardless of old Gateway headers', async (t) => {
-  const previous = process.env.XYVORA_UPDATE_KEY;
-  t.after(() => { if (previous === undefined) delete process.env.XYVORA_UPDATE_KEY; else process.env.XYVORA_UPDATE_KEY = previous; });
+test('Unlocked Vercel chat advertises only installed models, with search when both services are configured', async (t) => {
+  const restore = ['XYVORA_UPDATE_KEY', 'XYVORA_SEARXNG_URL', 'XYVORA_SEARXNG_KEY'].map((key) => [key, process.env[key]] as const);
+  t.after(() => { for (const [key, value] of restore) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } });
+  delete process.env.XYVORA_SEARXNG_URL;
+  delete process.env.XYVORA_SEARXNG_KEY;
   const password = 'in-process-chat-fixture';
   process.env.XYVORA_UPDATE_KEY = await makeUpdateKey(password);
   const origin = new URL(url).origin;
@@ -57,7 +60,12 @@ test('Unlocked Vercel chat advertises only Xyvora identity, modes, and built-in 
   assert.equal(pass?.status, 303);
   const cookie = pass?.headers.get('set-cookie')?.split(';', 1)[0] ?? '';
   const reply = await vercelChat.fetch(new Request(url, { headers: { Cookie: cookie, 'x-vercel-oidc-token': 'mock-runtime-token' } }));
-  assert.deepEqual(await reply.json(), { assistant: ASSISTANT_PROFILE, availability: 'server', models: [DEFAULT_MODEL], webSearch: true, modes: MODE_IDS, skills: SKILL_IDS });
+  const bundled = await bundledModelAvailable();
+  const base = { assistant: ASSISTANT_PROFILE, availability: bundled ? 'server' : 'unavailable', models: bundled ? [DEFAULT_MODEL] : [], webSearch: false, modes: MODE_IDS, skills: SKILL_IDS.filter((id) => skillAvailable(id, bundled, false)) };
+  assert.deepEqual(await reply.json(), base);
+  process.env.XYVORA_SEARXNG_URL = 'https://search.example.com';
+  const configured = await (await vercelChat.fetch(new Request(url, { headers: { Cookie: cookie } }))).json();
+  assert.deepEqual(configured, bundled ? { ...base, research: true, webSearch: true, skills: SKILL_IDS } : base);
   const invalid = request({ ...body, model: 'smollm' });
   invalid.headers.set('Cookie', cookie);
   assert.equal((await vercelChat.fetch(invalid)).status, 400);

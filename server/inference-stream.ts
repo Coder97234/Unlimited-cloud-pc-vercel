@@ -1,20 +1,28 @@
+import { EFFORTS } from '../shared/experience.ts';
+import type { Effort, ReplyLanguage } from '../shared/experience.ts';
+import type { LocalModel } from '../shared/local-models.ts';
 import type { HostedModel } from '../shared/hosted-models.ts';
 import type { ReplyMode } from '../shared/modes.ts';
 import type { ChatMessage } from '../shared/models.ts';
 import type { WebSource } from '../shared/search.ts';
 
-export type Evidence = { report?: boolean; project?: string; mode?: ReplyMode; task?: 'translate'; clock?: string; preferences?: string; sources?: WebSource[] };
+export type Evidence = { report?: boolean; project?: string; mode?: ReplyMode; effort?: Effort; language?: ReplyLanguage; task?: 'translate'; clock?: string; preferences?: string; sources?: WebSource[] };
 export type ServerGenerate = (messages: ChatMessage[], signal: AbortSignal, onText: (text: string) => void, evidence: Evidence) => Promise<void>;
 
-type StreamOutput = { model: (model?: HostedModel) => void; text: (value: string) => void; sources: (value: WebSource[]) => void };
+export type RoutedGenerate<T> = (...args: [...Parameters<ServerGenerate>, (model?: T) => void]) => Promise<void>;
+
+// A small reply budget does not mean a local process can cold-load quickly.
+export const localReplyTimeout = (effort?: Effort) => effort ? Math.max(60_000, EFFORTS[effort].timeout) : 105_000;
+
+type StreamOutput = { localModel: (model?: LocalModel) => void; model: (model?: HostedModel) => void; text: (value: string) => void; sources: (value: WebSource[]) => void; searching: () => void };
 
 // Only explicitly safe messages from our server are forwarded to the browser.
 export class InferenceError extends Error {}
 
-export function inferenceStream(work: (signal: AbortSignal, output: StreamOutput) => Promise<void>, requestSignal: AbortSignal) {
+export function inferenceStream(work: (signal: AbortSignal, output: StreamOutput) => Promise<void>, requestSignal: AbortSignal, timeout = 110_000) {
   const encoder = new TextEncoder();
   const canceled = new AbortController();
-  const deadline = AbortSignal.timeout(110_000);
+  const deadline = AbortSignal.timeout(timeout);
   const signal = AbortSignal.any([requestSignal, canceled.signal, deadline]);
   return new ReadableStream<Uint8Array>({
     start(controller) {
@@ -32,7 +40,9 @@ export function inferenceStream(work: (signal: AbortSignal, output: StreamOutput
               if (text.trim()) hasText = true;
               send({ choices: [{ delta: { content: text } }] });
             },
+            localModel: (model) => { if (model && !signal.aborted) send({ localModel: model }); },
             model: (model) => { if (model && !signal.aborted) send({ hostedModel: model }); },
+            searching: () => { if (!signal.aborted) send({ searching: true }); },
             sources: (sources) => { if (!signal.aborted) send({ sources }); },
           });
           signal.throwIfAborted();

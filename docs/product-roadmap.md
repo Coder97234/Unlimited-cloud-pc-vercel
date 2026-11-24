@@ -4,12 +4,12 @@
 
 ## Working in this workspace
 
-- Streaming chat with five reply profiles, Web search with sources, built-in local tools, and local history. All five modes use the same small text engine.
+- Streaming chat with four ranked slots, separate effort and reply styles, built-in local tools, and local history. Hosted model slots and snippet-based SearXNG search need configuration.
 - Text, code, CSV/JSON, and text-based PDF attachments. Scanned-PDF OCR is still separate.
 - Markdown chat download.
 - **Chat controls:** Temporary chat in the sidebar, edit or branch without changing an original chat, and **Context → This message only** for exchanges that should neither receive nor supply earlier context. These controls require no new server services.
 - **Personalization:** opt-in saved notes, with editing, deletion, and separate guest/account memory. Xyvora owns account identity, sessions, synced history, settings and memory in PostgreSQL. Social sign-in and verified email/password with reset require server setup.
-- **Plugins are paused:** Script Lab, Image Studio, public GitHub/npm tools, and external account connections are retained for later review but not available in the sign-in release. Local photo previews still work.
+- **Plugins are paused:** Script Lab, Image Studio, and public GitHub/npm tools are retained for later review. Gmail and Vercel are separate opt-in, read-only connections. Local photo previews still work.
 - **Developer API:** Free keyless streaming text with documented limits, sample commands and an OpenAPI spec. Apps call from their server. No unlimited compute commitment.
 - **Transparency:** Public analytics counts actual opted-in browser activity with a separate registered account total. No active database yields an unavailable state. Terms, Privacy and Cookie choices describe controls; the owner still needs to confirm legal and operational requirements.
 - **Background tasks:** Optional account-scoped text replies through a durable PostgreSQL queue and leased worker. No external action or scheduled workflows.

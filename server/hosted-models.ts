@@ -1,55 +1,72 @@
+import { EFFORTS, replyGuidance } from '../shared/experience.ts';
 import { HOSTED_PROVIDERS, isHostedProvider, parseHostedModel } from '../shared/hosted-models.ts';
 import type { HostedModel, HostedProvider, ModelChoice } from '../shared/hosted-models.ts';
 import { SYSTEM_PROMPT } from '../shared/models.ts';
 import type { ChatMessage } from '../shared/models.ts';
 import { MODES } from '../shared/modes.ts';
 import { InferenceError } from './inference-stream.ts';
-import type { Evidence, ServerGenerate } from './inference-stream.ts';
+import type { Evidence, RoutedGenerate, ServerGenerate } from './inference-stream.ts';
 import { asObject } from './workspace-http.ts';
 
-export type ModelRequest = HostedModel & { url: string; key: string };
+// Only send provider-specific reasoning controls for a known/selected API
+// capability. An arbitrary compatibility endpoint gets standard token caps.
+type ReasoningApi = 'openai-none' | 'anthropic-adaptive' | 'gemini-flash-budget';
+export type ModelRequest = HostedModel & { url: string; key: string; reasoning?: ReasoningApi };
+type TextStreamRequest = ModelRequest & { local?: true; localTokenLimit?: number; localReasoning?: { effort?: string; tokens: number } };
 export type HostedConfig = { models: ModelRequest[]; userLimit: number; siteLimit: number };
 const native = 'xyvora' as const;
 const modelLimit = 36_000;
 
-export function hostedConfigFrom(env: Record<string, string | undefined>): HostedConfig | undefined {
+type Environment = Record<string, string | undefined>;
+
+function endpointFor(provider: HostedProvider, model: string, env: Environment) {
+  if (provider === 'openai') return 'https://api.openai.com/v1/chat/completions';
+  if (provider === 'anthropic') return 'https://api.anthropic.com/v1/messages';
+  if (provider === 'gemini') return /^[\w.-]+$/.test(model)
+    ? `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse` : undefined;
+  try {
+    const endpoint = new URL(env.XYVORA_COMPATIBLE_URL ?? '');
+    // Trusted deployer sets the entire destination; clients cannot set a host,
+    // path, redirect, protocol, or credential.
+    if (endpoint.protocol === 'https:' && !endpoint.username && !endpoint.password && !endpoint.port && !endpoint.search && !endpoint.hash
+      && /^([a-z0-9-]+\.)+[a-z][a-z0-9-]{1,}$/.test(endpoint.hostname) && !/\.(localhost|local|internal|lan|test|invalid)$/.test(endpoint.hostname)
+      && endpoint.pathname.endsWith('/chat/completions')) return endpoint.href;
+  } catch { /* Not configured. */ }
+}
+
+function modelRequest(found: HostedModel, env: Environment, permission: unknown): ModelRequest | undefined {
+  const { provider, model } = found;
+  const key = env[`XYVORA_${provider.toUpperCase()}_KEY`]?.trim();
+  const url = endpointFor(provider, model, env);
+  if (!url || !key || key.length > 512 || !/^[\x21-\x7e]+$/.test(key)) return;
+  const reasoning: ReasoningApi | undefined = provider === 'openai' && permission === 'openai-none' ? permission
+    : provider === 'anthropic' && permission === 'anthropic-adaptive' ? permission
+    : provider === 'gemini' && /^gemini-2\.5-flash(?:$|-preview-[\w.-]+$)/.test(model) && permission === 'gemini-flash-budget' ? permission : undefined;
+  return { ...found, key, url, reasoning };
+}
+
+export function hostedConfigFrom(env: Environment): HostedConfig | undefined {
   if (env.XYVORA_ENABLE_HOSTED_MODELS !== '1' || (env.XYVORA_AUTH_SECRET?.trim().length ?? 0) < 32) return;
-  const models: ModelRequest[] = [];
-  for (const provider of Object.keys(HOSTED_PROVIDERS).filter(isHostedProvider)) {
+  const models = Object.keys(HOSTED_PROVIDERS).filter(isHostedProvider).flatMap((provider) => {
     const prefix = `XYVORA_${provider.toUpperCase()}`;
     const found = parseHostedModel({ provider, model: env[`${prefix}_MODEL`]?.trim() });
-    const key = env[`${prefix}_KEY`]?.trim();
-    if (!found || !key || key.length > 512 || !/^[\x21-\x7e]+$/.test(key)) continue;
-    const { model } = found;
-    let url: string;
-    if (provider === 'openai') url = 'https://api.openai.com/v1/chat/completions';
-    else if (provider === 'anthropic') url = 'https://api.anthropic.com/v1/messages';
-    else if (provider === 'gemini') {
-      if (!/^[\w.-]+$/.test(model)) continue;
-      url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse`;
-    } else {
-      try {
-        const endpoint = new URL(env.XYVORA_COMPATIBLE_URL ?? '');
-        // Trusted deployer sets the entire destination. Neither prompts nor
-        // users can select a host, path, redirect, protocol or credentials.
-        if (endpoint.protocol !== 'https:' || endpoint.username || endpoint.password || endpoint.port || endpoint.search || endpoint.hash
-          || !/^([a-z0-9-]+\.)+[a-z][a-z0-9-]{1,}$/.test(endpoint.hostname) || /\.(localhost|local|internal|lan|test|invalid)$/.test(endpoint.hostname)
-          || !endpoint.pathname.endsWith('/chat/completions')) continue;
-        url = endpoint.href;
-      } catch { continue; }
-    }
-    models.push({ ...found, key, url });
-  }
+    const resolved = found && modelRequest(found, env, env[`${prefix}_REASONING`]);
+    return resolved ? [resolved] : [];
+  });
   const userLimit = Number(env.XYVORA_HOSTED_PER_ACCOUNT || 12), siteLimit = Number(env.XYVORA_HOSTED_PER_SITE || 120);
   if (!models.length || !Number.isSafeInteger(userLimit) || userLimit < 1 || userLimit > 250 || !Number.isSafeInteger(siteLimit) || siteLimit < 1 || siteLimit > 10_000) return;
   return { models, userLimit, siteLimit };
 }
 
-function providerRequest(config: ModelRequest, messages: ChatMessage[], evidence: Evidence) {
+function providerRequest(config: TextStreamRequest, messages: ChatMessage[], evidence: Evidence) {
   const { provider, key, model } = config;
   const mode = evidence.report ? 'pro' : evidence.mode ?? 'normal';
-  const out = mode === 'instant' && !evidence.task ? 260 : mode === 'thinker' || mode === 'pro' ? 1_400 : 950;
+  const out = evidence.effort ? (evidence.task ? Math.max(950, EFFORTS[evidence.effort].hosted) : EFFORTS[evidence.effort].hosted) : mode === 'instant' && !evidence.task ? 260 : mode === 'thinker' || mode === 'pro' ? 1_400 : 950;
+  const effort = evidence.task ? undefined : evidence.effort;
+  const thinking = effort ? EFFORTS[effort].thinking : undefined;
+  const guidance = evidence.task ? '' : replyGuidance(evidence.effort, evidence.language);
   const system = SYSTEM_PROMPT + (evidence.task === 'translate' ? '\nTranslate the text into the requested language. Return only the translation.' : `\nReply style: ${MODES[mode].description}`)
+    + (guidance ? `\nReply guidance: ${guidance}` : '')
     + (evidence.clock ? `\nCurrent time from the platform: ${evidence.clock}.` : '')
     + (evidence.report ? '\nWrite a brief with findings, source agreement and differences, and gaps. Cite each supported finding. A retrieved introduction is not a full page.' : '')
     + (evidence.sources?.length ? '\nCite the numbered web excerpts with [1], [2], etc. Do not invent sources, and say if the excerpts don’t answer the question.' : '');
@@ -62,14 +79,21 @@ function providerRequest(config: ModelRequest, messages: ChatMessage[], evidence
   let body: object;
   if (provider === 'anthropic') {
     headers.set('x-api-key', key); headers.set('anthropic-version', '2023-06-01');
-    body = { model, system, messages: history, max_tokens: out, stream: true };
+    body = { model, system, messages: history, max_tokens: out + (config.reasoning === 'anthropic-adaptive' ? thinking ?? 0 : 0), stream: true,
+      ...(effort && config.reasoning === 'anthropic-adaptive' && (effort === 'low' ? { thinking: { type: 'disabled' } }
+        : { thinking: { type: 'adaptive' }, output_config: { effort: ({ medium: 'low', high: 'medium', extra: 'high', max: 'max' } as const)[effort] } })) };
   } else if (provider === 'gemini') {
     headers.set('x-goog-api-key', key);
-    body = { systemInstruction: { parts: [{ text: system }] }, contents: history.map(({ role, content }) => ({ role: role === 'assistant' ? 'model' : 'user', parts: [{ text: content }] })), generationConfig: { maxOutputTokens: out } };
+    body = { systemInstruction: { parts: [{ text: system }] }, contents: history.map(({ role, content }) => ({ role: role === 'assistant' ? 'model' : 'user', parts: [{ text: content }] })), generationConfig: { maxOutputTokens: out + (config.reasoning === 'gemini-flash-budget' ? thinking ?? 0 : 0),
+        ...(thinking !== undefined && config.reasoning === 'gemini-flash-budget' && { thinkingConfig: { thinkingBudget: thinking, includeThoughts: false } }) } };
   } else {
-    headers.set('Authorization', `Bearer ${key}`);
+    if (key) headers.set('Authorization', `Bearer ${key}`);
     body = { model, messages: [{ role: 'system', content: system }, ...history], stream: true,
-      ...(provider === 'openai' ? { max_completion_tokens: out } : { max_tokens: out }) };
+      ...(provider === 'openai' ? { max_completion_tokens: out + (config.reasoning === 'openai-none' ? thinking ?? 0 : 0),
+        ...(effort && config.reasoning === 'openai-none' && { reasoning_effort: ({ low: 'none', medium: 'low', high: 'medium', extra: 'high', max: 'xhigh' } as const)[effort] }) } : {
+          max_tokens: Math.min(out + (config.localReasoning?.tokens ?? 0), config.localTokenLimit ?? Infinity),
+          ...(config.localReasoning?.effort && { reasoning_effort: config.localReasoning.effort }),
+        }) };
   }
   return { headers, body: JSON.stringify(body) };
 }
@@ -77,7 +101,7 @@ function providerRequest(config: ModelRequest, messages: ChatMessage[], evidence
 const incomplete = () => new InferenceError('The selected model’s connection ended before the reply finished. Try again.');
 const providerFailure = () => new InferenceError('The selected model couldn’t complete this reply. Try again or choose a different model.');
 
-async function readProviderStream(response: Response, provider: HostedProvider, signal: AbortSignal, text: (delta: string) => void) {
+async function readProviderStream(response: Response, provider: HostedProvider, signal: AbortSignal, text: (delta: string) => void, byteLimit: number) {
   const reader = response.body?.getReader();
   if (!reader) throw incomplete();
   const decoder = new TextDecoder();
@@ -122,7 +146,7 @@ async function readProviderStream(response: Response, provider: HostedProvider, 
       const next = await reader.read();
       if (next.done) { buffer += decoder.decode(); if (buffer.trim()) event(buffer); break; }
       bytes += next.value.byteLength;
-      if (bytes > 650_000) throw providerFailure();
+      if (bytes > byteLimit) throw providerFailure();
       buffer += decoder.decode(next.value, { stream: true });
       let separator: RegExpExecArray | null;
       while (!done && (separator = /\r?\n\r?\n/.exec(buffer))) {
@@ -136,15 +160,21 @@ async function readProviderStream(response: Response, provider: HostedProvider, 
   } finally { await reader.cancel().catch(() => undefined); reader.releaseLock(); }
 }
 
-export async function generateHosted(config: ModelRequest, messages: ChatMessage[], signal: AbortSignal, text: (delta: string) => void, evidence: Evidence, fetcher = fetch, timeout = 80_000) {
-  const attempt = AbortSignal.any([signal, AbortSignal.timeout(timeout)]);
+export async function generateHosted(config: TextStreamRequest, messages: ChatMessage[], signal: AbortSignal, text: (delta: string) => void, evidence: Evidence, fetcher = fetch, timeout = 80_000) {
+  const attempt = AbortSignal.any([signal, AbortSignal.timeout(evidence.effort && !config.local ? Math.min(timeout, EFFORTS[evidence.effort].timeout) : timeout)]);
   try {
     const response = await fetcher(config.url, { ...providerRequest(config, messages, evidence), method: 'POST', redirect: 'error', signal: attempt, cache: 'no-store' });
     if (!response.ok || !response.headers.get('content-type')?.toLowerCase().includes('text/event-stream')) {
       await response.body?.cancel().catch(() => undefined);
-      throw new InferenceError(response.status === 429 ? 'The selected model is at capacity. Try again shortly or choose a different model.' : 'The selected model is unavailable. Check the provider configuration or choose a different model.');
+      const message = response.status === 429 ? 'The selected model is at capacity. Try again shortly or choose a different model.'
+        : config.local ? response.status === 400 || response.status === 413
+          ? 'The local model could not accept the request. Shorten the prompt or included context, or choose another Helio model.'
+          : 'The selected local model is unavailable. Check the runner or choose another Helio model.'
+        : 'The selected model is unavailable. Check the provider configuration or choose a different model.';
+      throw new InferenceError(message);
     }
-    await readProviderStream(response, config.provider, attempt, text);
+    // Thinking frames count toward the wire limit even though they are not shown.
+    await readProviderStream(response, config.provider, attempt, text, config.localReasoning ? 4_000_000 : 650_000);
   } catch (error) {
     signal.throwIfAborted();
     if (error instanceof InferenceError) throw error;
@@ -152,15 +182,15 @@ export async function generateHosted(config: ModelRequest, messages: ChatMessage
   }
 }
 
-export type RoutedGenerate = (messages: ChatMessage[], signal: AbortSignal, output: (text: string) => void, evidence: Evidence, chosen: (model?: HostedModel) => void) => Promise<void>;
-export function modelRouter(config: HostedConfig, choice: Exclude<ModelChoice, typeof native>, reserve: () => Promise<boolean>, local?: ServerGenerate): RoutedGenerate | undefined {
-  if (choice !== 'auto' && !config.models.some(({ provider }) => provider === choice)) return;
+export function modelRouter(config: HostedConfig, choice: Exclude<ModelChoice, typeof native>, reserve: () => Promise<boolean>, local?: ServerGenerate): RoutedGenerate<HostedModel> | undefined {
+  const exact = choice === 'auto' ? undefined : config.models.find((model) => model.provider === choice);
+  if (choice !== 'auto' && !exact) return;
   return async (messages, signal, output, evidence, chosen) => {
-    const preferences = evidence.mode === 'creative' ? ['anthropic', 'openai', 'gemini', 'compatible']
+    const preferences: HostedProvider[] = evidence.mode === 'creative' ? ['anthropic', 'openai', 'gemini', 'compatible']
       : evidence.mode === 'thinker' ? ['gemini', 'anthropic', 'openai', 'compatible'] : ['openai', 'anthropic', 'gemini', 'compatible'];
     const automatic = choice === 'auto';
-    const slot = automatic ? preferences.map((provider) => config.models.find((model) => model.provider === provider)).find(Boolean) : config.models.find((model) => model.provider === choice);
-    if (automatic && local && !evidence.report && (evidence.mode === 'instant' || evidence.mode === 'normal' || evidence.mode === undefined)) {
+    const slot = automatic ? preferences.map((provider) => config.models.find((model) => model.provider === provider)).find(Boolean) : exact;
+    if (automatic && local && (!slot || (!evidence.report && (evidence.mode === 'instant' || evidence.mode === 'normal' || evidence.mode === undefined)))) {
       // Fast and routine modes keep their traffic on Xyvora; no hidden retry on another provider.
       chosen(); await local(messages, signal, output, evidence); return;
     }
@@ -168,12 +198,12 @@ export function modelRouter(config: HostedConfig, choice: Exclude<ModelChoice, t
     let started = false;
     try {
       signal.throwIfAborted();
-      if (!await reserve()) throw new InferenceError('The hosted model request budget is exhausted. Use the Xyvora model or try tomorrow.');
+      if (!await reserve()) throw new InferenceError('The hosted model request budget is exhausted. Use Helio 1 or try tomorrow.');
       await generateHosted(slot, messages, signal, (delta) => {
         if (!started && !delta.trim()) return;
-        if (!started) { started = true; chosen({ provider: slot.provider, model: slot.model }); }
+        if (!started) { started = true; chosen(parseHostedModel(slot)); }
         output(delta);
-      }, evidence, fetch, automatic ? 28_000 : 80_000);
+      }, evidence, fetch, automatic ? 28_000 : evidence.effort ? EFFORTS[evidence.effort].timeout : 80_000);
     } catch (error) {
       signal.throwIfAborted();
       if (!automatic || !local || started) throw error;

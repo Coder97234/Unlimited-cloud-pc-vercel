@@ -11,7 +11,7 @@ import { Dialog } from './Dialog.tsx';
 const icons = { folder: Folder, book: BookOpen, code: Code2, spark: Sparkles };
 export function ProjectIcon({ project }: { project: Pick<Project, 'icon' | 'color'> }) {
   const Icon = icons[project.icon];
-  return <span className={`project-icon project-${project.color}`}><Icon size={17} aria-hidden="true" /></span>;
+  return <span className={`project-icon project-${project.color === 'violet' ? 'orange' : project.color}`}><Icon size={17} aria-hidden="true" /></span>;
 }
 
 type Screen = { kind: 'index' | 'create' } | { kind: 'detail'; id: string; file?: string };
@@ -123,7 +123,7 @@ export function ProjectsDialog({ account, projects, initialId, initialFile, erro
       <label className="field-label">Name<input className="plugin-input" required maxLength={72} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></label>
       <label className="field-label">Description<textarea className="plugin-input" rows={2} maxLength={320} value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} /></label>
       <label className="field-label">Instructions<textarea className="plugin-input" rows={4} maxLength={MAX_PROJECT_INSTRUCTIONS} value={draft.instructions} onChange={(event) => setDraft({ ...draft, instructions: event.target.value })} /></label>
-      <div className="project-form-pair"><label className="field-label">Color<select className="plugin-input" value={draft.color} onChange={(event) => setDraft({ ...draft, color: event.target.value as ProjectDraft['color'] })}>{PROJECT_COLORS.map((color) => <option key={color}>{color}</option>)}</select></label>
+      <div className="project-form-pair"><label className="field-label">Color<select className="plugin-input" value={draft.color} onChange={(event) => setDraft({ ...draft, color: event.target.value as ProjectDraft['color'] })}>{PROJECT_COLORS.map((color) => <option value={color} key={color}>{color === 'violet' ? 'Orange' : color}</option>)}</select></label>
         <label className="field-label">Icon<select className="plugin-input" value={draft.icon} onChange={(event) => setDraft({ ...draft, icon: event.target.value as ProjectDraft['icon'] })}>{PROJECT_ICONS.map((icon) => <option key={icon}>{icon}</option>)}</select></label></div>
       <div className="dialog-actions">{selected && <button className="secondary-button" type="button" disabled={working} onClick={() => { setDraft(selected); setEditing(false); setError(''); }}>Cancel edit</button>}<button type="submit" className="primary-button" disabled={working || !draft.name.trim()}>{working ? 'Saving…' : 'Save project'}</button></div>
     </form>}

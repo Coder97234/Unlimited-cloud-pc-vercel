@@ -44,7 +44,7 @@ export async function prepareWeights(spec: WeightSpec, destination: string, sign
   const folder = dirname(destination);
   await mkdir(folder, { recursive: true });
   const scratch = await mkdtemp(join(folder, '.download-'));
-  const partial = join(scratch, 'model.gguf');
+  const partial = join(scratch, 'model.partial');
   try {
     const response = await requestFetch(spec.url, { signal });
     if (!response.ok || !response.body) {

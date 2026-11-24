@@ -1,10 +1,12 @@
 import { X } from 'lucide-react';
 import { useEffect, useId, useRef } from 'react';
+import { useLabels } from '../lib/labels.ts';
 import type { ReactNode } from 'react';
 
 export function Dialog({ title, subtitle, onClose, children, className }: {
   title: string; subtitle?: string; className?: string; onClose: () => void; children: ReactNode;
 }) {
+  const t = useLabels();
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
   useEffect(() => {
@@ -23,7 +25,7 @@ export function Dialog({ title, subtitle, onClose, children, className }: {
     <section className="dialog-panel">
       <header className="dialog-header">
         <div><h2 id={titleId} tabIndex={-1}>{title}</h2>{subtitle && <p>{subtitle}</p>}</div>
-        <button type="button" className="icon-button" onClick={onClose} aria-label="Close dialog"><X size={19} /></button>
+        <button type="button" className="icon-button" onClick={onClose} aria-label={t('close')}><X size={19} /></button>
       </header>
       {children}
     </section>

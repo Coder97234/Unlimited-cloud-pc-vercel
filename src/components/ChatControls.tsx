@@ -9,7 +9,7 @@ export function ContextDialog({ isolated, onPick, onClose }: {
   return <Dialog title="Message context" subtitle="Choose what earlier messages Xyvora can use when you send." onClose={onClose}>
     <div className="mode-list">
       <button type="button" className="mode-option" aria-pressed={!isolated} data-dialog-focus={!isolated || undefined} onClick={() => onPick(false)}>
-        <span className="plugin-icon tint-violet"><ListTree size={17} /></span>
+        <span className="plugin-icon tint-orange"><ListTree size={17} /></span>
         <span><strong>Recent chat</strong><small>Use eligible recent exchanges, within the reply mode’s history limit.</small></span>
         {!isolated && <Check size={17} className="mode-check" />}
       </button>

@@ -1,3 +1,4 @@
+import { useLabels } from '../lib/labels.ts';
 import { Check, Clipboard, Code2 } from 'lucide-react';
 import { useEffect, useId, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
@@ -34,6 +35,7 @@ function Diagram({ graph }: { graph: Flowchart }) {
 }
 
 export function CodeBlock({ text, language, settled }: { text: string; language?: string; settled: boolean }) {
+  const t = useLabels();
   const [highlight, setHighlight] = useState<{ text: string; lang: string; root: Root }>();
   const [feedback, setFeedback] = useState<'copied' | 'failed'>();
   const [showSource, setShowSource] = useState(false);
@@ -58,7 +60,7 @@ export function CodeBlock({ text, language, settled }: { text: string; language?
     {graph && <button type="button" className="text-button" onClick={() => setShowSource(!showSource)} aria-pressed={showSource}>{showSource ? 'Show diagram' : 'Show source'}</button>}
     <button type="button" className="text-button code-copy" onClick={async () => {
       try { await navigator.clipboard.writeText(text); setFeedback('copied'); } catch { setFeedback('failed'); }
-    }} aria-label="Copy code block">{feedback === 'copied' ? <Check size={14} /> : <Clipboard size={14} />}<span>{feedback === 'copied' ? 'Copied' : 'Copy'}</span></button>
+    }} aria-label={t('codeCopy')}>{feedback === 'copied' ? <Check size={14} /> : <Clipboard size={14} />}<span>{t(feedback === 'copied' ? 'copied' : 'copy')}</span></button>
   </div>
     {graph && !showSource ? <Diagram graph={graph} /> : <pre tabIndex={0}><code>{rendered ? rendered.children.map((node, index) => <Token node={node} key={index} />) : text}</code></pre>}
     {lang === 'mermaid' && settled && !graph && <p className="code-note">Showing source. Diagrams support short, acyclic Mermaid flowcharts with arrows and box labels.</p>}

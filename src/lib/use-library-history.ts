@@ -36,7 +36,8 @@ function confirmed(state: State, id: string, saved: LibraryEntry | null, version
   const chats = state.chats.filter((item) => item.id !== id);
   const local = state.chats.find((item) => item.id === id);
   // Edits made while this write was in flight remain dirty for the next save.
-  const desired = original === local ? saved?.chat : local;
+  const desired = original === local ? saved?.chat
+    : local && saved && original?.turns === local.turns ? { ...local, turns: saved.chat.turns } : local;
   if (saved) base.set(id, saved); else base.delete(id);
   if (desired) chats.push(desired);
   return { ...state, base, chats: sorted(chats), page: { next: state.page?.next ?? null, revision: version.revision, total: version.total } };
@@ -102,7 +103,7 @@ export function useLibraryHistory(accountId: string | undefined, busy: boolean, 
     const [id] = pending(state);
     if (!id) return;
     const desired = state.chats.find((item) => item.id === id);
-    const expected = state.base.get(id)?.revision ?? null;
+    const expected = state.base.get(id);
     const timer = setTimeout(() => {
       if (activity.current.busy || writing.current || current.current !== state) return;
       const controller = writing.current = new AbortController();
@@ -123,10 +124,14 @@ export function useLibraryHistory(accountId: string | undefined, busy: boolean, 
   async function open(chat: Thread, signal: AbortSignal) {
     const snapshot = current.current;
     const cached = snapshot.chats.find(({ id }) => id === chat.id);
-    if (!accountId || (cached && cached !== snapshot.base.get(chat.id)?.chat)) return cached ?? chat;
+    if (!accountId) return cached ?? chat;
     if (cached?.turns.length) return cached;
+    if (cached && cached !== snapshot.base.get(chat.id)?.chat) throw new Error('Wait for the new title to sync, then open this chat.');
     const entry = await openLibraryChat(accountId, chat.id, signal);
     signal.throwIfAborted();
+    const latest = current.current.chats.find(({ id }) => id === chat.id);
+    if (latest?.turns.length) return latest;
+    if (latest && latest !== current.current.base.get(chat.id)?.chat) throw new Error('Wait for the new title to sync, then open this chat.');
     setState((before) => {
       const now = before.chats.find(({ id }) => id === chat.id);
       if (now && (now.turns.length || now !== before.base.get(chat.id)?.chat)) return before;

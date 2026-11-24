@@ -28,7 +28,7 @@ function pageMeta([path, , pageTitle, summary]: typeof PUBLIC_PAGES[number]) {
   const title = escapeHtml(pageTitle), description = escapeHtml(summary), url = XYVORA_URL + path;
   return `<title>${title}</title>
     <meta name="description" content="${description}" />
-    <meta name="theme-color" content="#f8f7fb" />
+    <meta name="theme-color" content="#fdfbf7" />
     <link rel="icon" type="image/png" sizes="64x64" href="/brand/xyvora-icon.png" />
     <link rel="icon" type="image/svg+xml" href="${ORBIT_ASSET}" />
     <link rel="canonical" href="${url}" />
@@ -38,14 +38,14 @@ function pageMeta([path, , pageTitle, summary]: typeof PUBLIC_PAGES[number]) {
     <meta property="og:description" content="${description}" />
     <meta property="og:url" content="${url}" />
     <meta property="og:image" content="${socialImage}" />
-    <meta property="og:image:alt" content="Xyvora AI and Orbit, a violet robot with a glowing ring" />
+    <meta property="og:image:alt" content="Xyvora AI and Orbit, an orange, one-eyed triangle with an orbital ring" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="${title}" />
     <meta name="twitter:description" content="${description}" />
     <meta name="twitter:image" content="${socialImage}" />
-    <meta name="twitter:image:alt" content="Xyvora AI and Orbit, a violet robot with a glowing ring" />
+    <meta name="twitter:image:alt" content="Xyvora AI and Orbit, an orange, one-eyed triangle with an orbital ring" />
     <script src="/theme.js"></script>`;
 }
 

@@ -5,6 +5,7 @@ import '@fontsource-variable/manrope/wght.css';
 import App from './App.tsx';
 import { analyticsEnabled, startAnalytics } from './lib/analytics.ts';
 import './styles.css';
+import './workspace.css';
 import { styleEarlyAccess } from './lib/early-access.ts';
 
 styleEarlyAccess();

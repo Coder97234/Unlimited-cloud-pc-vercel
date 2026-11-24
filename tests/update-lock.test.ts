@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { checkUpdateLock, makeUpdateKey, updateLocked } from '../server/update-lock.ts';
+import { checkUpdateLock, makeUpdateKey, makeUpdateVerifier, updateKeyConfigured, updateLocked } from '../server/update-lock.ts';
 import { UPDATE_NOTICE } from '../server/update-page.ts';
 
 const origin = 'https://preview.example.invalid';
@@ -112,4 +112,65 @@ test('password guesses are bounded by a short per-client window in a warm instan
   assert.equal(cookieOnly(capped), '');
   assert.equal((await checkUpdateLock(signIn(), env, { ...client, ip: '192.0.2.73' }))?.status, 303);
   assert.equal((await checkUpdateLock(signIn(), env, { ...client, now: now + 300_000 }))?.status, 303);
+});
+
+test('two named passwords work alongside the primary and only revoke their own sessions', async () => {
+  const tester = 'Separate tester fixture!';
+  const dev = 'Different developer fixture!';
+  const [testerVerifier, devVerifier] = await Promise.all([makeUpdateVerifier(tester), makeUpdateVerifier(dev)]);
+  assert.match(testerVerifier, /^v2\.[a-f0-9]{32}\.[a-f0-9]{64}$/);
+  const primary = { XYVORA_UPDATE_KEY: await key };
+  const env = { ...primary, XYVORA_UPDATE_KEY_TESTER: testerVerifier, XYVORA_UPDATE_KEY_DEV: devVerifier };
+  assert.equal(updateKeyConfigured(env), true);
+  const visit = (cookie?: string) => new Request(origin + '/api/chat', { headers: cookie ? { Cookie: cookie } : undefined });
+  const oldCookie = cookieOnly(await checkUpdateLock(signIn(), primary, options));
+  assert.equal(await checkUpdateLock(visit(oldCookie), env, options), undefined);
+  assert.equal((await checkUpdateLock(visit(), env, options))?.status, 423);
+  for (const wrong of [tester.toLowerCase(), dev + ' ']) {
+    const result = await checkUpdateLock(signIn(wrong), env, options);
+    assert.equal(result?.status, 401);
+    assert.equal(cookieOnly(result), '');
+    const html = await result?.text() ?? '';
+    for (const secret of [tester, dev, testerVerifier, devVerifier]) assert.ok(!html.includes(secret));
+  }
+  const cookies: string[] = [];
+  for (const passphrase of [tester, dev]) {
+    const result = await checkUpdateLock(signIn(passphrase), env, options);
+    assert.equal(result?.status, 303);
+    assert.match(result?.headers.get('set-cookie') ?? '', /; HttpOnly; SameSite=Lax; Secure$/);
+    const cookie = cookieOnly(result);
+    cookies.push(cookie);
+    assert.equal(await checkUpdateLock(visit(cookie), env, options), undefined);
+  }
+  const [testerCookie, devCookie] = cookies;
+  const revoked = { ...primary, XYVORA_UPDATE_KEY_DEV: devVerifier };
+  assert.equal((await checkUpdateLock(visit(testerCookie), revoked, options))?.status, 423);
+  assert.equal((await checkUpdateLock(signIn(tester), revoked, options))?.status, 401);
+  assert.equal(await checkUpdateLock(visit(devCookie), revoked, options), undefined);
+  assert.equal(await checkUpdateLock(visit(oldCookie), revoked, options), undefined);
+  const rotated = { ...env, XYVORA_UPDATE_KEY_TESTER: await makeUpdateVerifier(tester) };
+  assert.equal((await checkUpdateLock(visit(testerCookie), rotated, options))?.status, 423);
+  assert.equal(await checkUpdateLock(visit(devCookie), rotated, options), undefined);
+  const newPrimary = { ...env, XYVORA_UPDATE_KEY: await makeUpdateKey(password) };
+  for (const cookie of [oldCookie, ...cookies]) assert.equal((await checkUpdateLock(visit(cookie), newPrimary, options))?.status, 423);
+  assert.equal((await checkUpdateLock(signIn(dev), newPrimary, options))?.status, 303);
+});
+
+test('misconfigured or excessive named verifiers fail closed even if public mode was selected', async () => {
+  const primary = { XYVORA_UPDATE_KEY: await key };
+  const verifier = await makeUpdateVerifier('Named credential fixture');
+  for (const env of [
+    { XYVORA_UPDATE_KEY_TESTER: verifier },
+    { ...primary, XYVORA_UPDATE_KEY_TESTER: 'malformed' },
+    { ...primary, XYVORA_UPDATE_KEY_TESTER: primary.XYVORA_UPDATE_KEY },
+    { ...primary, 'XYVORA_UPDATE_KEY_1TESTER': verifier },
+    { ...primary, XYVORA_UPDATE_KEY_A: verifier, XYVORA_UPDATE_KEY_B: verifier },
+    { ...primary, XYVORA_UPDATE_KEY_A: verifier, XYVORA_UPDATE_KEY_B: verifier, XYVORA_UPDATE_KEY_C: verifier, XYVORA_UPDATE_KEY_D: verifier },
+  ]) {
+    const config = { XYVORA_UPDATE_LOCK: '0', ...env };
+    assert.equal(updateLocked(config), true);
+    assert.equal(updateKeyConfigured(config), false);
+    assert.equal((await checkUpdateLock(signIn(), config, options))?.status, 503);
+    assert.equal((await checkUpdateLock(new Request(origin + '/api/chat'), config, options))?.status, 423);
+  }
 });

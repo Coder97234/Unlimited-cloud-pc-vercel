@@ -1,29 +1,12 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96">
-  <title>Orbit, the Xyvora mascot</title>
-  <defs>
-    <linearGradient id="shell" x1=".16" y1=".07" x2=".86" y2=".94">
-      <stop stop-color="#e9dbff"/>
-      <stop offset=".46" stop-color="#a27afa"/>
-      <stop offset="1" stop-color="#6239c7"/>
-    </linearGradient>
-    <linearGradient id="screen" x1=".18" y1="0" x2=".9" y2="1">
-      <stop stop-color="#493180"/>
-      <stop offset="1" stop-color="#281a49"/>
-    </linearGradient>
-    <linearGradient id="trail" x1="0" y1="1" x2="1" y2="0">
-      <stop stop-color="#956cf0"/>
-      <stop offset="1" stop-color="#e0cdff"/>
-    </linearGradient>
-  </defs>
-  <ellipse cx="47" cy="52" rx="39" ry="14" transform="rotate(-23 47 52)" fill="none" stroke="#7853c4" stroke-width="2.5"/>
-  <path d="M38 16q10-5 20 0l14 9q8 5 9 15l1 17q0 10-8 16L58 83q-10 6-20 0L22 73q-8-6-8-16l1-17q1-10 9-15z" fill="#5634a4" stroke="#4e3199" stroke-width="2.3"/>
-  <path d="M38 15q10-5 20 0l14 9q8 5 9 15l1 15q0 9-8 15L57 80q-9 5-18 0L22 69q-8-6-8-15l1-15q1-10 9-15z" fill="url(#shell)" stroke="#7758be" stroke-width="1.8"/>
-  <path d="M28 28l13-8q7-4 14 0l7 4M19 41l1-4" fill="none" stroke="#f8efff" stroke-linecap="round" stroke-width="2.5" opacity=".82"/>
-  <path d="M29 33q5-5 12-5h14q7 0 12 5l5 7q3 5 2 11l-1 5q-1 7-7 11l-11 6q-7 4-14 0l-11-6q-6-4-7-11l-1-5q-1-6 2-11z" fill="url(#screen)" stroke="#e2caff" stroke-opacity=".6" stroke-width="1.5"/>
-  <path d="M36 45v6m24-6v6" stroke="#f7efff" stroke-width="4.6" stroke-linecap="round"/>
-  <path d="M43 56q5 5 10 0" fill="none" stroke="#dcbdff" stroke-width="2.4" stroke-linecap="round"/>
-  <path d="M9 62c9 12 39 12 64-1 11-6 16-12 16-17" fill="none" stroke="#4f2d98" stroke-width="4.5" stroke-linecap="round"/>
-  <path d="M9 60c9 12 39 12 64-1 11-6 16-12 16-17" fill="none" stroke="url(#trail)" stroke-width="3" stroke-linecap="round"/>
-  <path d="M78 8c.75 5.9 2.1 7.3 8 8-5.9.75-7.25 2.1-8 8-.75-5.9-2.1-7.25-8-8 5.9-.7 7.25-2.1 8-8z" fill="#b6f0d7" stroke="#438769" stroke-width="1.2"/>
-  <circle cx="12" cy="34" r="2.4" fill="#ab83f9"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" fill="none">
+  <defs><linearGradient id="body" x1="30" y1="24" x2="72" y2="80" gradientUnits="userSpaceOnUse"><stop stop-color="#ffce6b"/><stop offset="1" stop-color="#ec681c"/></linearGradient></defs>
+  <path d="M14 66c7 15 41 19 62 7 14-8 18-21 7-32M12 48c4-11 14-17 25-21" stroke="#e57a39" stroke-width="2" stroke-linecap="round" stroke-dasharray="3 4"/>
+  <path d="m24 69-9 7m56-7 9 7m-47 1-5 9m34-9 5 9" stroke="#633018" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M43.8 22.8a4.8 4.8 0 0 1 8.4 0l25 45.6a5 5 0 0 1-4.4 7.4H23.2a5 5 0 0 1-4.4-7.4z" fill="url(#body)" stroke="#673016" stroke-width="2.8" stroke-linejoin="round"/>
+  <path d="m47.3 26.8-22.5 43h4.4l20.3-39.2z" fill="#fff0b2" opacity=".83"/>
+  <path d="M32 63h32m-38 6h44m-28-6v6m13 0v6m8-14 8 12" stroke="#a84218" stroke-width="1.15" opacity=".56"/>
+  <path d="M31 48c9-11 25-12 34 0-8 12-25 12-34 0Z" fill="#fff9df" stroke="#683017" stroke-width="2.25"/>
+  <path d="M48 41c3 2 5 4 5 7.5S51 54 48 56c-3-2-5-4-5-7.5s2-5.5 5-7.5Z" fill="#4c2418"/><circle cx="49.1" cy="45.7" r="1.3" fill="#fff8df"/>
+  <ellipse cx="46" cy="18" rx="15" ry="4" transform="rotate(-19 46 18)" stroke="#be5623" stroke-width="2"/>
+  <path d="m71 13 2 4.5 4.5 2-4.5 2-2 4.5-2-4.5-4.5-2 4.5-2z" fill="#fa9d33"/><circle cx="15" cy="39" r="2" fill="#ff9a37"/><circle cx="85" cy="61" r="2" fill="#ea6d25"/>
 </svg>

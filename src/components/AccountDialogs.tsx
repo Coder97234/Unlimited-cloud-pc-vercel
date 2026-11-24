@@ -44,7 +44,7 @@ export function AccountDialog({ account, error, unsynced, initialView, onRetry, 
   return <Dialog title={account.user ? 'Your Xyvora account' : awaitingCode ? 'Check your email' : view === 'reset' ? 'Reset your password' : passwords || providers.length ? view === 'signup' ? 'Create a Xyvora account' : 'Sign in to Xyvora' : 'Guest workspace'}
     subtitle={account.user ? 'Manage your sign-in and saved workspace.' : 'Sign-in is optional. Guest chats stay on this device.'} onClose={() => { if (!task.busy) onClose(); }}>
     {account.user ? <>
-      <div className="identity-card"><span className="plugin-icon tint-violet"><UserRound size={20} /></span><div>
+      <div className="identity-card"><span className="plugin-icon tint-orange"><UserRound size={20} /></span><div>
         <strong>{account.user.name || 'Signed in'}</strong>{account.user.email && <p>{account.user.email}</p>}
       </div></div>
       <p className="form-hint">Saved chats, workspace settings, and memory sync across devices signed in to this account. Guest and Temporary chats are not synced.</p>

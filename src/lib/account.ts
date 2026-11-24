@@ -1,5 +1,3 @@
-import { parseHostedModel } from '../../shared/hosted-models.ts';
-import type { HostedModel } from '../../shared/hosted-models.ts';
 import { ACCOUNT_AUTH_PATHS, isAccountId, isAccountProvider, isSupabaseAuthOrigin } from '../../shared/account.ts';
 import type { AccountLink, AccountProvider, AccountStatus, EmailPurpose, SupabaseAuthPublic } from '../../shared/account.ts';
 import { emptyMemory, parseMemory } from '../../shared/memory.ts';
@@ -39,11 +37,10 @@ export async function loadAccount(signal: AbortSignal): Promise<AccountStatus> {
   const providers = Array.isArray(value.providers) ? value.providers.filter(isAccountProvider) : [];
   const user = value.user;
   if (user !== null && (!isAccountId(user?.id) || typeof user?.name !== 'string' || typeof user?.email !== 'string')) throw new Error('Could not verify your account.');
-  const hostedModels: HostedModel[] = Array.isArray(value.hostedModels) ? value.hostedModels.map(parseHostedModel).filter((model: HostedModel | undefined): model is HostedModel => !!model) : [];
   const auth = value.supabase;
   const supabase: SupabaseAuthPublic | undefined = isSupabaseAuthOrigin(auth?.origin) ? { origin: auth.origin, passwords: auth.passwords === true,
     providers: Array.isArray(auth.providers) ? auth.providers.filter((name: unknown) => name === 'google' || name === 'github') : [] } : undefined;
-  return { providers, user, supabase, ...(user && hostedModels.length && { hostedModels }), passwords: value.passwords === true, background: value.background === true,
+  return { providers, user, supabase, passwords: value.passwords === true, background: value.background === true,
     ...(value.passwords === true && value.emailVerification === 'code' && { emailVerification: 'code' as const }), settings: parsePreferences(value.settings), ...(value.projects === true && { projects: true }), ...(value.library === true && { library: true }), ...(value.sessions === true && { sessions: true }) };
 }
 
@@ -146,7 +143,7 @@ export async function saveMemory(profile: MemoryProfile, accountId: string | und
     return saved;
   }
   try {
-    if (!profile.enabled && !profile.notes.length) localStorage.removeItem(guestMemoryKey);
+    if (profile.enabled && !profile.notes.length) localStorage.removeItem(guestMemoryKey);
     else localStorage.setItem(guestMemoryKey, JSON.stringify(profile));
   } catch { throw new Error('This browser could not save memory.'); }
   return profile;

@@ -120,6 +120,10 @@ test('Google and GitHub fixture sign-in verifies PKCE, consumes state, and isola
   const read = (jar: CookieJar, id: string) => issue(new Request(origin + memoryPath, { headers: jar.headers(id) }));
   const save = (jar: CookieJar, id: string, profile: MemoryProfile) => issue(platformPost(memoryPath, { action: 'save-memory', profile, user_id: signedInB.id }, jar.headers(id)));
   assert.deepEqual(await (await read(a, signedInA.id)).json(), { profile: emptyMemory() });
+  const emptyOptOut = { enabled: false, notes: [] };
+  assert.equal((await save(a, signedInA.id, emptyOptOut)).status, 200);
+  assert.deepEqual(await (await read(a, signedInA.id)).json(), { profile: emptyOptOut });
+  assert.deepEqual(await (await read(b, signedInB.id)).json(), { profile: emptyMemory() });
   const notes = { enabled: true, notes: ['Prefer examples from Ada’s workshop.'] };
   assert.equal((await save(a, signedInA.id, notes)).status, 200);
   assert.equal((await read(b, signedInA.id)).status, 409);

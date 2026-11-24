@@ -14,7 +14,7 @@ import { Dialog } from './Dialog.tsx';
 import { RepositoryWorkbench } from './RepositoryWorkbench.tsx';
 
 const icons = { script: Code2, image: Image, repo: GitBranch, api: Server, gmail: Mail, vercel: Triangle };
-const tints = { script: 'violet', image: 'peach', repo: 'mint', api: 'sky', gmail: 'peach', vercel: 'mint' };
+const tints = { script: 'orange', image: 'peach', repo: 'mint', api: 'sky', gmail: 'peach', vercel: 'mint' };
 const labels = { script: 'On this device', image: 'On this device', repo: 'Public · patch export', api: 'Public · GET only', gmail: 'Read-only', vercel: 'Read-only' };
 const setupLinks = { gmail: 'https://myaccount.google.com/connections', vercel: 'https://vercel.com/account/settings/authentication' };
 const all = Object.keys(PLUGINS) as PluginId[];
@@ -101,7 +101,7 @@ const sizeLabels = { '1024x1024': 'Square · 1024 × 1024', '1536x1024': 'Landsc
 type StudioMode = 'local' | 'hosted' | 'vision';
 
 function ImageStudio({ initial, status, onChoosePhoto }: { initial?: string; status?: WorkspaceStatus; onChoosePhoto: () => void }) {
-  const [prompt, setPrompt] = useState((initial || 'A violet sky with a mint aurora').slice(0, 1_200));
+  const [prompt, setPrompt] = useState((initial || 'An orange sky with a mint aurora').slice(0, 1_200));
   const [caption, setCaption] = useState('');
   const [style, setStyle] = useState<ArtStyle>(() => /mountain|hill|landscape|ridge/i.test(initial ?? '') ? 'Terrain' : /planet|orbit|space/i.test(initial ?? '') ? 'Orbit' : 'Aurora');
   const [selection, setSelection] = useState<StudioMode>();

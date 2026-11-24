@@ -17,6 +17,7 @@ const errors = [];
 const expectedAuthFailure = new WeakSet();
 let deviceIndex = 0;
 const runAddress = randomUUID().slice(0, 4);
+const fixtureHeaders = () => ({ 'X-Vercel-Forwarded-For': `2001:db8:${runAddress}::${(++deviceIndex).toString(16)}` });
 const close = (page) => page.getByRole('dialog').getByRole('button', { name: 'Close dialog' }).click();
 const field = (page) => page.getByRole('textbox', { name: 'Message Xyvora' });
 const ask = async (page, prompt) => { await field(page).fill(prompt); await field(page).press('Enter'); };
@@ -60,7 +61,7 @@ function zipFixture(entries) {
 async function makeContext(width, scheme = 'light') {
   const context = await browser.newContext({ viewport: { width, height: width > 500 ? 900 : 844 }, isMobile: width < 500, hasTouch: width < 500, colorScheme: scheme,
     // Give only our local, disposable auth tests separate rate-limit buckets.
-    extraHTTPHeaders: { 'X-Vercel-Forwarded-For': `2001:db8:${runAddress}::${(++deviceIndex).toString(16)}` }, acceptDownloads: true });
+    extraHTTPHeaders: fixtureHeaders(), acceptDownloads: true });
   context.on('page', (page) => {
     page.on('pageerror', (error) => errors.push(`${page.url()}: ${error.message}`));
     page.on('console', (message) => {
@@ -73,9 +74,8 @@ async function makeContext(width, scheme = 'light') {
 }
 async function sidebarButton(page, name) {
   const sidebar = page.locator('#workspace-sidebar');
-  if (await page.getByRole('button', { name: 'Open sidebar', exact: true }).isVisible()) {
-    await page.getByRole('button', { name: 'Open sidebar', exact: true }).click();
-  }
+  const opener = page.getByRole('button', { name: 'Open sidebar', exact: true });
+  if (await opener.isVisible() && await opener.getAttribute('aria-expanded') !== 'true') await opener.click();
   return sidebar.getByRole('button', { name, exact: typeof name === 'string' });
 }
 async function checkPublic(page, origin) {
@@ -156,6 +156,9 @@ async function checkGuest(page, width) {
   await search.getByRole('searchbox').fill('84.50');
   await search.getByRole('button', { name: '/calc 18% of 84.50', exact: true }).click();
   await expectVisible(calc);
+  await (await sidebarButton(page, 'Filter chats')).click();
+  assert.equal(await search.getByRole('button', { name: 'Chats', exact: true }).getAttribute('aria-pressed'), 'true');
+  await close(page);
   await page.keyboard.press('Control+Shift+N');
   await page.getByRole('heading', { name: 'What’s on your mind?' }).waitFor();
   await field(page).press('?');
@@ -174,8 +177,20 @@ async function checkGuest(page, width) {
   await expectVisible(credited.getByText('Elijah Richardson', { exact: true }));
   assert.match(await credited.innerText(), /published credits.*won’t speculate/s);
 
-  await page.getByRole('button', { name: 'Reply mode: Normal' }).click();
-  await page.getByRole('dialog', { name: 'Reply mode' }).getByRole('button', { name: /^Instant / }).click();
+  const replyTrigger = page.getByRole('button', { name: 'Model: Xyvora Quick · Effort: Medium' });
+  await replyTrigger.press('ArrowDown');
+  const modelMenu = page.getByRole('menu', { name: 'Model', exact: true });
+  await expectVisible(modelMenu);
+  assert.equal(await modelMenu.getByRole('menuitemradio').count(), 4);
+  await modelMenu.getByRole('menuitem', { name: /^Effort/ }).click();
+  const effortMenu = page.getByRole('menu', { name: 'Effort', exact: true });
+  assert.equal(await effortMenu.getByRole('menuitemradio', { name: /^Medium / }).getAttribute('aria-checked'), 'true');
+  await effortMenu.locator('button:focus').press('ArrowUp');
+  assert.match(await effortMenu.locator('button:focus').innerText(), /^Low/);
+  await effortMenu.locator('button:focus').press('Enter');
+  await expectVisible(page.getByRole('button', { name: 'Model: Xyvora Quick · Effort: Low' }));
+  assert.equal(await modelMenu.count(), 0);
+  await page.waitForFunction(() => document.activeElement === document.querySelector('textarea[aria-label="Message Xyvora"]'));
   await page.getByRole('button', { name: 'Message context' }).click();
   await page.getByRole('dialog').getByRole('button', { name: /This message only/ }).click();
   await expectVisible(page.getByText('This message only · Earlier exchanges and saved memory aren’t included.'));
@@ -228,13 +243,12 @@ async function checkGuest(page, width) {
     await close(page);
   } else {
     await ask(page, '/gmail');
-    await expectVisible(page.getByText(/Plugins are paused. I haven’t run this request/));
-    assert.equal(await page.getByRole('dialog').count(), 0);
+    await expectVisible(page.getByRole('dialog', { name: 'Workspace settings' }).getByText('Sign in to manage app connections'));
+    await close(page);
     assert.equal(pluginRequests, 0, 'The app must not try to reach the paused route, even for a photo preview');
   }
 
-  // Give Web search a deterministic network fixture. The production Wiby
-  // and Wikipedia requests are tested at the route boundary in node tests.
+  // Give search a deterministic fixture; the SearXNG adapter is unit tested.
   let requests = 0;
   const endpoint = guest + '/api/chat';
   const fixture = async (route) => {
@@ -244,7 +258,7 @@ async function checkGuest(page, width) {
     assert.equal(data.attachment, undefined);
     requests++;
     await route.fulfill({ headers: { 'Content-Type': 'text/event-stream', 'X-Xyvora-Source': 'server' }, body: [
-      JSON.stringify({ sources: [{ title: 'Leaf', url: 'https://en.wikipedia.org/wiki/Leaf', provider: 'wikipedia' }] }),
+      JSON.stringify({ sources: [{ title: 'Leaf', url: 'https://www.fs.usda.gov/learn/trees/leaf', provider: 'searxng' }] }),
       JSON.stringify({ choices: [{ delta: { content: 'Leaves contain pigments.' } }] }), '[DONE]',
     ].map((data) => `data: ${data}\n\n`).join('') });
   };
@@ -253,11 +267,12 @@ async function checkGuest(page, width) {
   await page.waitForResponse((res) => res.url() === endpoint, { timeout: 2_000 }).catch(() => undefined);
   await ask(page, '/search color of leaves');
   await expectVisible(page.getByText('Leaves contain pigments.', { exact: true }));
-  await expectVisible(page.getByRole('link', { name: /Leaf en.wikipedia.org/ }));
+  await expectVisible(page.getByRole('link', { name: /Leaf www.fs.usda.gov/ }));
   assert.equal(requests, 1);
   await page.unroute(endpoint, fixture);
 
   await (await sidebarButton(page, 'Workspace settings')).click();
+  await page.getByRole('button', { name: 'Appearance', exact: true }).click();
   await page.getByRole('button', { name: 'Keyboard shortcuts' }).click();
   await expectVisible(page.getByRole('dialog', { name: 'Keyboard shortcuts' }));
   if (!WORKSPACE_PLUGINS_ENABLED) assert.equal(await page.getByText('Open Plugins', { exact: true }).count(), 0);
@@ -270,6 +285,14 @@ async function checkGuest(page, width) {
   await expectVisible(page.getByRole('dialog', { name: 'About Xyvora AI' }));
   await close(page);
   await ask(page, '/calc 2+8');
+  const oldTitle = await sidebarButton(page, '/calc 2+8');
+  if (width >= 760) await oldTitle.dblclick();
+  else await oldTitle.press('F2');
+  const rename = page.getByRole('textbox', { name: 'Chat title' });
+  await rename.fill('  Orchard journal  ');
+  await rename.press('Enter');
+  await page.locator('.history-entry').getByText('Orchard journal', { exact: true }).waitFor();
+  if (width < 760) await page.keyboard.press('Escape');
   await page.getByRole('button', { name: 'Edit prompt in a new branch' }).click();
   await expectVisible(page.getByRole('dialog', { name: 'Edit in a new branch' }));
   await page.getByRole('button', { name: 'Open edited draft' }).click();
@@ -278,9 +301,11 @@ async function checkGuest(page, width) {
   await page.getByRole('button', { name: 'Branch from reply' }).click();
   await expectVisible(page.getByRole('dialog', { name: 'Branch from this reply' }));
   await close(page);
-  await (await sidebarButton(page, 'Delete /calc 2+8')).click();
+  const deleteChat = await sidebarButton(page, 'Delete Orchard journal');
+  if (width >= 760) await page.locator('.history-entry').filter({ hasText: 'Orchard journal' }).hover();
+  await deleteChat.click();
   await page.getByRole('dialog', { name: 'Delete conversation?' }).getByRole('button', { name: 'Delete chat', exact: true }).click();
-  assert.equal(await page.locator('.history-entry').filter({ hasText: '/calc 2+8' }).count(), 0);
+  assert.equal(await page.locator('.history-entry').filter({ hasText: 'Orchard journal' }).count(), 0);
   if (width < 500) await page.keyboard.press('Escape');
   console.log(`Guest ${width}px: 9 routes, shared footer/theme, commands, attachments, playground, status, shortcuts and plugin gates.`);
 }
@@ -567,6 +592,7 @@ async function checkPrivateWorkspace(page, device, width) {
   await device.locator('.workspace-profile small').getByText('Cloud history', { exact: true }).waitFor({ state: 'attached' });
   assert.equal(await device.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
   await (await sidebarButton(page, 'Workspace settings')).click();
+  await dialog.getByRole('button', { name: 'Appearance', exact: true }).click();
   const syncSetting = (key, value) => page.waitForResponse((response) => response.url() === `${live}/api/account?section=settings` && response.request().postDataJSON()?.settings?.[key] === value && response.ok());
   await Promise.all([syncSetting('accent', 'lagoon'), dialog.getByLabel('Accent').selectOption('lagoon')]);
   await Promise.all([syncSetting('density', 'compact'), dialog.getByLabel('Density').selectOption('compact')]);
@@ -617,7 +643,9 @@ async function checkAccount(primary, width) {
   const dark = page.getByRole('button', { name: 'Switch to dark theme' });
   if (await dark.isVisible()) await dark.click();
   await (await sidebarButton(page, 'Workspace settings')).click();
+  await dialog.getByRole('button', { name: 'Replies', exact: true }).click();
   await page.getByLabel('Default reply mode').selectOption('instant');
+  await page.getByLabel('Default effort').selectOption('extra');
   await close(page);
   await (await sidebarButton(page, /^Memory/)).click();
   for (let index = 1; index <= 9; index++) {
@@ -633,11 +661,24 @@ async function checkAccount(primary, width) {
     const device = await second.newPage();
     await device.goto(live + '/');
     await login(device, email, password);
-    await device.getByRole('button', { name: `Reply mode: Instant`, exact: true }).waitFor();
+    await device.getByRole('button', { name: 'Model: Xyvora Quick · Effort: Extra', exact: true }).waitFor();
     assert.equal(await device.locator('html').getAttribute('data-theme'), 'dark');
-    await device.getByRole('button', { name: saved, exact: true, includeHidden: true }).waitFor({ state: 'attached' });
+    const title = `Synced journal ${width}`;
+    const entry = await sidebarButton(device, saved);
+    await entry.press('F2');
+    const editor = device.getByRole('textbox', { name: 'Chat title' });
+    await editor.fill(title);
+    const pendingRename = device.waitForResponse((res) => res.url().endsWith('/api/account?section=library') && res.request().postDataJSON()?.action === 'rename');
+    await editor.press('Enter');
+    const renamed = await pendingRename;
+    assert.equal(renamed.status(), 200);
+    const renameData = renamed.request().postDataJSON();
+    assert.equal(renameData.title, title);
+    assert.equal(renameData.chat, undefined, 'Sidebar rename must not submit partial chat content');
     await (await sidebarButton(device, /Search chats/)).click();
-    await device.getByRole('dialog').getByRole('button', { name: saved, exact: true }).click();
+    const palette = device.getByRole('dialog');
+    await palette.getByRole('searchbox').fill(title);
+    await palette.getByRole('button', { name: title, exact: true }).click();
     await expectVisible(device.getByRole('article', { name: 'Calculator response' }));
     await (await sidebarButton(device, /^Memory/)).click();
     assert.equal(await device.getByRole('textbox', { name: 'Memory note 9' }).inputValue(), 'Fixture 9');
@@ -665,6 +706,9 @@ async function checkAccount(primary, width) {
     await device.getByText(/Preview sample · not a live model/).waitFor();
     await close(device);
 
+    // Keep the long fixture's account reset phase independent of the quota
+    // consumed by the preceding sync, project, and task requests.
+    await page.setExtraHTTPHeaders(fixtureHeaders());
     await page.goto(live + '/');
     await page.getByRole('button', { name: 'Your account' }).click();
     const management = dialog.getByRole('button', { name: 'Manage sessions' });
@@ -673,9 +717,12 @@ async function checkAccount(primary, width) {
       await dialog.getByText('This session', { exact: true }).waitFor();
       await dialog.getByText('Other session', { exact: true }).waitFor();
     }
+    const signingOut = page.waitForResponse((response) => response.url() === `${live}/api/account` && response.request().method() === 'POST' && response.request().postDataJSON()?.action === 'sign-out');
     await dialog.getByRole('button', { name: 'Sign out', exact: true }).click();
-    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-    assert.equal(await page.getByRole('button', { name: saved, exact: true, includeHidden: true }).count(), 0);
+    const signedOut = await signingOut;
+    assert.equal(signedOut.status(), 200, 'Could not sign out of the local test account');
+    await page.locator('.topbar').getByRole('button', { name: 'Sign in', exact: true }).click();
+    assert.equal(await page.getByRole('button', { name: title, exact: true, includeHidden: true }).count(), 0);
     assert.equal(await page.getByRole('button', { name: `/calc 7+${width}`, exact: true, includeHidden: true }).count(), 1);
     await dialog.getByRole('button', { name: 'Forgot password?' }).click();
     await openEmailStep(page, email, 'reset', codes);
@@ -684,13 +731,13 @@ async function checkAccount(primary, width) {
     await device.reload();
     await expectVisible(device.getByRole('button', { name: 'Sign in', exact: true }));
     await login(page, email, next);
-    await page.getByRole('button', { name: saved, exact: true, includeHidden: true }).waitFor({ state: 'attached' });
+    await page.getByRole('button', { name: title, exact: true, includeHidden: true }).waitFor({ state: 'attached' });
     await page.getByRole('button', { name: 'Your account' }).click();
     await dialog.getByRole('button', { name: 'Delete account', exact: true }).click();
     await dialog.getByRole('button', { name: 'Delete permanently' }).click();
     await page.getByRole('button', { name: 'Sign in', exact: true }).waitFor();
   } finally { await second.close(); }
-  console.log(`Account ${width}px (${codes ? 'email codes' : 'email links'}): verified signup, cross-device sign-in/chat/preferences/9 notes, persisted queue, analytics, sign-out/reset and deletion.`);
+  console.log(`Account ${width}px (${codes ? 'email codes' : 'email links'}): verified signup, cross-device sign-in/rename/chat/preferences/9 notes, persisted queue, analytics, sign-out/reset and deletion.`);
 }
 
 try {

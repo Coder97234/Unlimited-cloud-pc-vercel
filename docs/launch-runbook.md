@@ -24,7 +24,7 @@ The API enqueues only approved text prompts. The queue lives in PostgreSQL; leas
 
 ## 4. Keep plugins paused for the sign-in release
 
-- Leave `WORKSPACE_PLUGINS_ENABLED` off in `shared/workspace-tools.ts`. `/api/workspace` must reject status, actions, and OAuth callbacks even if provider settings exist. Do not configure Zapier, Sheets, Gmail/Vercel connections, or paid media for sign-in. Browser photo previews stay local.
+- Leave `WORKSPACE_PLUGINS_ENABLED` off in `shared/workspace-tools.ts`. Leave `XYVORA_ENABLE_APP_CONNECTIONS` unset for a sign-in-only release. `/api/workspace` must then reject status, actions, and OAuth callbacks even if provider settings exist. Test opt-in read-only Gmail/Vercel connections in separate protected staging, never as a prerequisite for sign-in. Keep Zapier, Sheets, and paid media paused. Browser photo previews stay local.
 - If plugins are later approved for a separate release, use the [provider setup and limits](../README.md#configure-read-only-connections-and-hosted-image-tools-optional). Sign-in credentials, provider approval, and any spending decision remain separate.
 
 ## 5. Verify the candidate, then promote

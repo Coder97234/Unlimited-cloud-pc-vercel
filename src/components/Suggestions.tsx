@@ -1,23 +1,21 @@
-import { ArrowUpRight, BookOpen, Calculator, ImagePlus, ListChecks, PenLine } from 'lucide-react';
+import { BookOpen, Calculator, CodeXml, ImagePlus, ListChecks, PenLine } from 'lucide-react';
+import { useLabels } from '../lib/labels.ts';
 import { SKILLS } from '../../shared/skill-catalog.ts';
 
 const suggestions = [
-  { title: 'Explain a concept', caption: 'Make it click', icon: BookOpen, color: 'violet', prompt: 'Explain recursion with a simple, everyday analogy, then show a short example.' },
-  { title: 'Write something', caption: 'Find the right words', icon: PenLine, color: 'peach', prompt: 'Write an opening paragraph for a cozy mystery set in a seaside town.' },
-  { title: 'Calculate something', caption: 'Get an exact result', icon: Calculator, color: 'mint', prompt: SKILLS.calc.example },
+  { title: 'write', icon: PenLine, prompt: 'Write an opening paragraph for a cozy mystery set in a seaside town.' },
+  { title: 'learn', icon: BookOpen, prompt: 'Explain recursion with a simple, everyday analogy, then show a short example.' },
+  { title: 'code', icon: CodeXml, prompt: 'Show a small JavaScript example that groups items by category. Explain how it works in two sentences.' },
+  { title: 'calculate', icon: Calculator, prompt: SKILLS.calc.example },
+  { title: 'plan', icon: ListChecks, prompt: SKILLS.plan.example },
 ] as const;
-const image = { title: 'Create an image', caption: 'Open Image Studio', icon: ImagePlus, color: 'sky', prompt: '' } as const;
-const plan = { title: 'Make a plan', caption: 'Find the next steps', icon: ListChecks, color: 'sky', prompt: SKILLS.plan.example } as const;
 
 export function Suggestions({ onPick, onImage }: { onPick: (prompt: string) => void; onImage?: () => void }) {
+  const t = useLabels();
   return <section className="suggestions" aria-label="Suggested prompts">
-    <div className="section-eyebrow">TRY A PROMPT</div>
-    <div className="suggestion-grid">
-      {[...suggestions, onImage ? image : plan].map(({ title, caption, icon: Icon, color, prompt }) => <button type="button" key={title} className="suggestion-card" onClick={prompt ? () => onPick(prompt) : onImage}>
-        <span className={`suggestion-icon tint-${color}`}><Icon size={18} strokeWidth={1.85} /></span>
-        <ArrowUpRight className="suggestion-arrow" size={15} />
-        <strong>{title}</strong><span className="suggestion-caption">{caption}</span>
-      </button>)}
-    </div>
+    {suggestions.map(({ title, icon: Icon, prompt }) => <button type="button" key={title} className="suggestion-card" onClick={() => onPick(prompt)}>
+      <Icon size={15} strokeWidth={1.75} />{t(title)}
+    </button>)}
+    {onImage && <button type="button" className="suggestion-card" onClick={onImage}><ImagePlus size={15} />Create an image</button>}
   </section>;
 }

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { isAccountId } from '../shared/account.ts';
-import { isThreadId, parseCloudThreads } from '../shared/history.ts';
+import { chatTitle, isThreadId, parseCloudThreads } from '../shared/history.ts';
 import type { Thread } from '../shared/history.ts';
 import { LIBRARY_MAX_BYTES, LIBRARY_MAX_CHAT_BYTES, LIBRARY_MAX_CHATS, LIBRARY_PAGE, olderCursor, parseLibraryChat } from '../shared/library.ts';
 import type { LibraryEntry } from '../shared/library.ts';
@@ -128,6 +128,16 @@ export async function changeLibrary(db: PlatformDb, owner: string, input: Record
     const [current] = await tx.query<ChatRow & { bytes: number }>(`select ${fields},bytes,turns from xyvora_chats where account_id=$1 and id=$2 for update`, [owner, id]);
     const [{ total, size }] = await tx.query<{ total: number; size: number }>('select count(*)::int as total,coalesce(sum(bytes),0)::float8 as size from xyvora_chats where account_id=$1', [owner]);
     if (input.action === 'remove' && !current) return { entry: null, revision, total };
+    if (input.action === 'rename') {
+      const title = chatTitle(input.title);
+      if (!title || input.expected === null) throw new ToolError('Enter a valid chat title and version.');
+      if (current?.title === title) return { entry: entry(current), revision, total };
+      if (!current || current.revision !== input.expected) return { conflict: true, entry: current ? entry(current) : null, revision, total };
+      const [row] = await tx.query<ChatRow>(`update xyvora_chats set title=$3, revision=$4, updated_ms=$5
+        where account_id=$1 and id=$2 returning ${fields},turns`, [owner, id, title, fresh, Math.max(Date.now(), current.updatedAt + 1)]);
+      await tx.query('update xyvora_library set revision=$2 where account_id=$1', [owner, fresh]);
+      return { entry: entry(row), revision: fresh, total };
+    }
     if (input.action !== 'remove' && input.action !== 'save') throw new ToolError('Unknown conversation action.');
     let chat: Thread | undefined;
     if (input.action === 'save') {

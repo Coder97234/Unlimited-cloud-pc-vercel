@@ -4,7 +4,7 @@ export const WORKSPACE_PLUGINS_ENABLED = false;
 
 export const PLUGINS = {
   script: { name: 'Script Lab', summary: 'Run JavaScript on this device in an isolated engine. No network, account access, or shell.', example: '/run console.log(20 * 6)' },
-  image: { name: 'Image Studio', summary: 'Generate or analyze images with a configured provider, or make local 4K graphics.', example: '/image Violet mountains at dusk' },
+  image: { name: 'Image Studio', summary: 'Generate or analyze images with a configured provider, or make local 4K graphics.', example: '/image Orange mountains at dusk' },
   repo: { name: 'GitHub workbench', summary: 'Inspect public repositories and issues, bring a file into chat, and export reviewed edits as a patch.', example: '/repo octocat/Hello-World' },
   api: { name: 'API Explorer', summary: 'Review read-only requests for GitHub repositories, releases, and npm package metadata.', example: '/api https://api.github.com/repos/octocat/Hello-World' },
   gmail: { name: 'Gmail', summary: 'Read up to five inbox subjects, senders, and dates. No message bodies, drafts, or sending.', example: 'Show my latest Gmail messages' },

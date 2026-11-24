@@ -97,6 +97,7 @@ test('Supabase email and PKCE sessions, issuance, scoped deletion, and hosted bu
     assert.equal(init.redirect, 'error');
     if (url.host === 'api.openai.com') {
       upstream++;
+      assert.equal(body.model, 'gpt-4.1-mini');
       assert.equal(headers.get('authorization'), 'Bearer fixture-openai-secret');
       return response({ choices: [{ delta: { content: 'Water moves downhill.' } }] }, '[DONE]');
     }
@@ -125,7 +126,7 @@ test('Supabase email and PKCE sessions, issuance, scoped deletion, and hosted bu
   const handle = (request: Request) => handleAccount(request, config, { limit: false });
   const authPost = (operation: string, fields: object, headers: Record<string, string> = {}) => handle(platformPost(accountPath, { action: 'supabase-auth', operation, ...fields }, headers));
   const status = await (await handle(new Request(origin + accountPath))).json();
-  assert.equal(status.user, null); assert.equal(status.hostedModels, undefined);
+  assert.equal(status.user, null); assert.equal(status.hostedModels, undefined); assert.equal(status.helioSlots, undefined);
   assert.deepEqual(status.supabase, { origin: supabaseOrigin, providers: ['google', 'github'], passwords: true });
   assert.doesNotMatch(JSON.stringify(status), /sb_secret|fixture-only-auth/);
   assert.equal((await authPost('signup', { email, password: 'a'.repeat(73) })).status, 400);
@@ -137,14 +138,17 @@ test('Supabase email and PKCE sessions, issuance, scoped deletion, and hosted bu
   door.update(verified);
   const member = await (await handle(new Request(origin + accountPath, { headers: door.headers() }))).json();
   assert.notEqual(member.user.id, legacy, 'Matching verified addresses must not adopt prior private data');
-  assert.deepEqual(member.hostedModels, hostedConfigFrom(modelsEnv)?.models.map(({ provider, model }) => ({ provider, model })));
+  assert.equal(member.hostedModels, undefined);
   assert.doesNotMatch(JSON.stringify(member), /fixture-openai-secret/);
   const hosted = hostedModelsFor(config);
   const ask = (headers: Record<string, string>, model = 'openai') => handleChat(platformPost('/api/chat', { model, mode: 'pro', messages: input }, headers), { hosted });
   assert.equal((await ask({})).status, 401);
   assert.equal((await ask(door.headers(legacy))).status, 409);
   assert.equal((await ask({ ...door.headers(member.user.id), Origin: 'https://different.invalid' })).status, 403);
-  for (let n = 0; n < 2; n++) {
+  assert.equal((await ask(door.headers(member.user.id), 'variant:gpt-5-4')).status, 400);
+  assert.equal((await ask(door.headers(member.user.id), 'helio-3')).status, 503);
+  assert.equal(upstream, 0);
+  for (let index = 0; index < 2; index++) {
     const streamed = await ask(door.headers(member.user.id));
     const labels: string[] = [], parts: string[] = [];
     await readChatEvents(streamed.body!, (part) => parts.push(part), true, undefined, ({ provider }) => labels.push(provider));

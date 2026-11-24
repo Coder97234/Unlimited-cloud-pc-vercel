@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
-import { checkUpdateLock, makeUpdateKey } from '../server/update-lock.ts';
+import { makeUpdateKey, makeUpdateVerifier } from '../server/update-lock.ts';
 import { readdir } from 'node:fs/promises';
-import api from '../api/chat.js';
 import middleware from '../middleware.js';
 import workspace from '../api/workspace.js';
 import account from '../api/account.js';
@@ -10,26 +9,37 @@ import analytics from '../api/analytics.js';
 import { guestAccount } from '../shared/account.ts';
 import { MODE_IDS } from '../shared/modes.ts';
 import { PUBLIC_API_EXAMPLE, WORKSPACE_PLUGINS_ENABLED } from '../shared/workspace-tools.ts';
-import { WIBY_SEARCH_URL, WIKI_SEARCH_URL, searchWeb } from '../server/web-search.ts';
 import { ASSISTANT_PROFILE, DEFAULT_MODEL } from '../shared/models.ts';
 import { readChatEvents } from '../src/lib/stream.ts';
+
+// This check exercises the bundled weights, never a configured gateway.
+delete process.env.XYVORA_LOCAL_RUNNER;
+delete process.env.XYVORA_HELIO5_MODEL;
+const { default: api } = await import('../api/chat.js');
 
 const url = 'https://bundle-check.invalid/api/chat';
 const origin = new URL(url).origin;
 // Replace the real configuration only in this smoke-test process. Never
 // print or consume the deployment credential in the engine checks.
-const password = randomBytes(24).toString('base64url');
+for (const name of Object.keys(process.env)) if (name.startsWith('XYVORA_UPDATE_KEY_')) delete process.env[name];
+const [password, tester, developer] = Array.from({ length: 3 }, () => randomBytes(24).toString('base64url'));
 process.env.XYVORA_UPDATE_KEY = await makeUpdateKey(password);
+process.env.XYVORA_UPDATE_KEY_TESTER = await makeUpdateVerifier(tester);
+process.env.XYVORA_UPDATE_KEY_DEVELOPER = await makeUpdateVerifier(developer);
 for (const [path, route] of [['chat', api], ['account', account], ['analytics', analytics], ['workspace', workspace]]) {
   const denied = await route.fetch(new Request(`${origin}/api/${path}`));
   assert.equal(denied.status, 423, `${path} must be locked before any service work`);
   assert.equal((await denied.json()).code, 'UPDATE_LOCKED');
 }
-const unlocked = await checkUpdateLock(new Request(`${origin}/_xyvora/unlock`, {
-  method: 'POST', headers: { Origin: origin }, body: new URLSearchParams({ password }),
-}), process.env, { deployed: true });
-assert.equal(unlocked?.status, 303, 'Fixture password did not unlock production handlers');
-const cookie = unlocked.headers.get('set-cookie').split(';', 1)[0];
+const cookies = [];
+for (const passphrase of [password, tester, developer]) {
+  const unlocked = await middleware(new Request(`${origin}/_xyvora/unlock`, {
+    method: 'POST', headers: { Origin: origin }, body: new URLSearchParams({ password: passphrase }),
+  }));
+  assert.equal(unlocked.status, 303, 'Fixture password did not unlock production middleware');
+  cookies.push(unlocked.headers.get('set-cookie').split(';', 1)[0]);
+}
+const [cookie] = cookies;
 const earlyRequest = (address, init = {}) => {
   const headers = new Headers(init.headers);
   headers.set('Cookie', cookie);
@@ -44,7 +54,11 @@ assert.equal(asset.status, 423);
 const permitted = await middleware(earlyRequest(`${origin}/theme.js`));
 assert.equal(permitted.headers.get('x-middleware-next'), '1');
 assert.match(permitted.headers.get('cache-control') ?? '', /no-store/);
-console.log('XYVORA_UPDATE packaged middleware, API gate and independent fixture session verified');
+for (const candidate of cookies) {
+  const allowed = await api.fetch(new Request(url, { headers: { Cookie: candidate } }));
+  assert.equal(allowed.status, 200, 'A packaged unlock cookie must pass the independent API gate');
+}
+console.log('XYVORA_UPDATE packaged middleware and API gate verified for primary and two distinct fixture keys');
 const status = await (await api.fetch(earlyRequest(url))).json();
 assert.deepEqual(status.assistant, ASSISTANT_PROFILE);
 assert.deepEqual(status.modes, MODE_IDS);
@@ -54,7 +68,9 @@ assert.deepEqual(await (await account.fetch(earlyRequest('https://bundle-check.i
 assert.equal((await (await analytics.fetch(earlyRequest('https://bundle-check.invalid/api/analytics'))).json()).available, false);
 assert.ok(!(await readdir('dist', { recursive: true })).some((file) => file.endsWith('.gguf')));
 const networkFetch = globalThis.fetch;
-let lookupsAllowed = false;
+const searchFixture = 'https://bundle-search.example.com/search';
+if (process.argv.includes('--search')) { process.env.XYVORA_SEARXNG_URL = searchFixture; delete process.env.XYVORA_SEARXNG_KEY; }
+else delete process.env.XYVORA_SEARXNG_URL;
 let publicAllowed = false;
 const publicReads = new Set([
   PUBLIC_API_EXAMPLE, `${PUBLIC_API_EXAMPLE}/contents?ref=master`, `${PUBLIC_API_EXAMPLE}/contents/README?ref=master`,
@@ -62,8 +78,12 @@ const publicReads = new Set([
 ]);
 globalThis.fetch = async (url, options) => {
   const address = new URL(url);
-  assert.ok((lookupsAllowed && [WIBY_SEARCH_URL, WIKI_SEARCH_URL].includes(address.origin + address.pathname))
-    || (publicAllowed && publicReads.has(address.href)), 'Unexpected network access');
+  if (process.env.XYVORA_SEARXNG_URL === searchFixture && address.href === searchFixture) {
+    assert.equal(options.method, 'POST');
+    assert.equal(options.body.get('q'), 'NASA Artemis program');
+    return Response.json({ results: [{ title: 'NASA Artemis', url: 'https://www.nasa.gov/artemis/', content: 'NASA’s Artemis program plans crewed exploration of the Moon.' }] });
+  }
+  assert.ok(publicAllowed && publicReads.has(address.href), 'Unexpected network access');
   return networkFetch(url, options);
 };
 
@@ -86,7 +106,7 @@ async function check(label, content, expected, { timeZone = 'UTC', searchQuery, 
   assert.doesNotMatch(text, /qwen/i);
   if (searchQuery) assert.ok(sources?.some(({ title }) => /artemis/i.test(title)));
   if (searchQuery) assert.ok(sources.every(({ excerpt }) => excerpt === undefined), 'Only source metadata should reach the client');
-  console.log(`XYVORA_BUNDLE ${label}: first ${Math.round(first)}ms, finished ${Math.round(performance.now() - start)}ms, ${count} deltas${searchQuery ? `, ${sources.length} live sources` : ''}`);
+  console.log(`XYVORA_BUNDLE ${label}: first ${Math.round(first)}ms, finished ${Math.round(performance.now() - start)}ms, ${count} deltas${searchQuery ? `, ${sources.length} fixture sources` : ''}`);
 }
 await check('identity', 'Who made Xyvora AI?', /Xyvora AI.*xyvora\.net.*Ethan Bennett.*Noberto Dominguez.*Elijah Richardson.*Developer.*xyvora\.net\/about/s, { source: 'skill', skill: 'about' });
 await check('calculator', 'What is 18% of 84.50?', /15\.21/, { source: 'skill', skill: 'calc' });
@@ -108,10 +128,8 @@ await check('after cancellation', 'What is the capital of Japan? Answer in one s
 await check('Creative translation', '/translate Spanish: Good morning!', /buenos d[íi]as/i, { mode: 'creative' });
 await check('Instant translation', '/translate Spanish: Good morning!', /buenos d[íi]as/i, { mode: 'instant' });
 if (process.argv.includes('--search')) {
-  lookupsAllowed = true;
-  const independent = await searchWeb('unix shell tutorial', AbortSignal.timeout(7_000));
-  console.log(`XYVORA_BUNDLE provider check: ${[...new Set(independent.map(({ provider }) => provider))].join(', ') || 'no results'}`);
-  await check('live search', 'What is NASA’s Artemis program?', /artemis|nasa|moon/i, { searchQuery: 'NASA Artemis program', mode: 'instant' });
+  assert.equal((await (await api.fetch(earlyRequest(url))).json()).webSearch, true);
+  await check('SearXNG fixture', 'What is NASA’s Artemis program?', /artemis|nasa|moon/i, { searchQuery: 'NASA Artemis program', mode: 'instant' });
 }
 const apiRequest = (data) => earlyRequest('https://bundle-check.invalid/api/workspace', {
   method: 'POST', headers: { Origin: 'https://bundle-check.invalid', 'Content-Type': 'application/json' },

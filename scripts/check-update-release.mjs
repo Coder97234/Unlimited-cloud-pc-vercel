@@ -7,7 +7,7 @@ const config = JSON.parse(await readFile(new URL('../vercel.json', import.meta.u
 assert.equal(config.proxy?.entrypoint, 'middleware.js');
 assert.equal(config.proxy.matcher, undefined, 'Do not exclude assets or API routes from the gate.');
 if (updateLocked(process.env, true)) {
-  if (!updateKeyConfigured(process.env)) throw new Error('Configure a valid sensitive XYVORA_UPDATE_KEY before releasing the locked site.');
+  if (!updateKeyConfigured(process.env)) throw new Error('Configure a valid sensitive XYVORA_UPDATE_KEY and valid named verifiers (if any) before releasing the locked site.');
   const origin = 'https://release-check.invalid';
   const front = await middleware(new Request(origin, { headers: { Accept: 'text/html' } }));
   assert.equal(front.headers.get('x-xyvora-update'), 'locked');

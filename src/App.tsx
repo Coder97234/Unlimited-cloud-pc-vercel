@@ -1,32 +1,33 @@
-import { Blocks, Download, Folder, GitBranch, ListTree, LockKeyhole, MoreHorizontal, Moon, PanelLeftOpen, Shield, Sparkles, Sun, UserRound, X } from 'lucide-react';
+import { Blocks, Download, Folder, GitBranch, LockKeyhole, MoreHorizontal, Moon, PanelLeftOpen, Shield, Sun, UserRound, X } from 'lucide-react';
 import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { guestAccount, parseAccountLink } from '../shared/account.ts';
 import type { AccountLink, AccountStatus } from '../shared/account.ts';
 import { isVisionFile, MAX_VISION_QUESTION } from '../shared/media.ts';
-import { HOSTED_PROVIDERS } from '../shared/hosted-models.ts';
-import type { ModelChoice } from '../shared/hosted-models.ts';
+import { DEFAULT_EFFORT, isHelioModelId, LANGUAGES, rankedModels } from '../shared/experience.ts';
+import type { Effort, HelioModelId, Language, ModelTier, ReplyLanguage } from '../shared/experience.ts';
+import { chatTitle, savedModelSelection } from '../shared/history.ts';
 import { LIBRARY_MAX_CHATS, LIBRARY_MAX_TURNS } from '../shared/library.ts';
 import { MAX_MEMORY_NOTE, memoryForSend } from '../shared/memory.ts';
 import type { MemoryProfile } from '../shared/memory.ts';
 import { readSkillCommand } from '../shared/skill-catalog.ts';
-import { DEFAULT_MODEL, MAX_ATTACHMENT, MAX_PROMPT, XYVORA_NAME, XYVORA_SITE } from '../shared/models.ts';
+import { DEFAULT_MODEL, MAX_ATTACHMENT, MAX_PROMPT, XYVORA_NAME } from '../shared/models.ts';
 import type { Availability, TextAttachment } from '../shared/models.ts';
-import { XYVORA_SLOGAN } from '../shared/site.ts';
 import type { Project } from '../shared/projects.ts';
+import { parsePreferences } from '../shared/preferences.ts';
 import type { Appearance, Theme, WorkspacePreferences } from '../shared/preferences.ts';
-import { allowsSearchToggle, chatSearchQuery, isResearchPrompt, MAX_SEARCH_QUERY } from '../shared/search.ts';
+import { allowsSearchToggle, explicitSearchQuery, isResearchPrompt, MAX_SEARCH_QUERY } from '../shared/search.ts';
 import { DEFAULT_MODE } from '../shared/modes.ts';
 import type { ReplyMode } from '../shared/modes.ts';
-import { isProvider, PLUGINS, WORKSPACE_PLUGINS_ENABLED, workspaceIntent } from '../shared/workspace-tools.ts';
+import { isProvider, WORKSPACE_PLUGINS_ENABLED, workspaceIntent } from '../shared/workspace-tools.ts';
 import type { RepoWorkbenchDraft } from '../shared/repositories.ts';
-import type { PluginIntent } from '../shared/workspace-tools.ts';
+import type { PluginIntent, Provider } from '../shared/workspace-tools.ts';
 import { brandAnswer } from '../shared/branding.ts';
 import { fencedText } from '../shared/text-tools.ts';
 import { runInstantSkill, teamAnswerSkill } from '../shared/skills.ts';
 import { AccountDialog, MemoryDialog, PasswordLinkDialog } from './components/AccountDialogs.tsx';
 import { TasksDialog } from './components/TasksDialog.tsx';
 import { VisionDialog } from './components/VisionDialog.tsx';
-import { BrandLockup } from './components/Brand.tsx';
+import { WelcomeMark } from './components/Brand.tsx';
 import { BranchDialog, ContextDialog } from './components/ChatControls.tsx';
 import { ChatOptionsDialog } from './components/ChatOptionsDialog.tsx';
 import { CommandPalette } from './components/CommandPalette.tsx';
@@ -34,11 +35,14 @@ import { Composer } from './components/Composer.tsx';
 import { Dialog } from './components/Dialog.tsx';
 import { Sidebar } from './components/Sidebar.tsx';
 import { SiteFooter } from './components/SiteFooter.ts';
-import { ModeDialog } from './components/ModeDialog.tsx';
 import { Suggestions } from './components/Suggestions.tsx';
 import { Transcript } from './components/Transcript.tsx';
-import { AboutDialog, SettingsDialog, ShortcutsDialog } from './components/WorkspaceDialogs.tsx';
-import { accountChangeKey, accountMemoryChangeKey, guestMemoryKey, invalidSessionEvent, loadAccount, loadAccountMemory, loadGuestMemory, notifyAccountChange, saveAccountSettings } from './lib/account.ts';
+import { AboutDialog, ShortcutsDialog } from './components/WorkspaceDialogs.tsx';
+import { SettingsDialog } from './components/SettingsDialog.tsx';
+import type { SettingsCategory } from './components/SettingsDialog.tsx';
+import { Locale, labelsFor } from './lib/labels.ts';
+import { useVoice } from './lib/use-voice.ts';
+import { accountChangeKey, accountMemoryChangeKey, guestMemoryKey, invalidSessionEvent, loadAccount, loadAccountMemory, loadGuestMemory, notifyAccountChange, saveAccountSettings, saveMemory } from './lib/account.ts';
 import { EARLY_ACCESS, PUBLIC_CREDENTIALS } from './lib/early-access.ts';
 import { downloadConversation } from './lib/export-chat.ts';
 import { buildMessages, forkThread, loadThreads, MAX_THREADS, MAX_TURNS, titleForPrompt } from './lib/history.ts';
@@ -49,7 +53,7 @@ import { ChatError, streamChat } from './lib/stream.ts';
 import { photoBase64, prepareVisionPhoto } from './lib/vision-file.ts';
 import type { VisionPhoto } from './lib/vision-file.ts';
 import { approveTool, getWorkspace } from './lib/workspace-api.ts';
-import { appearanceFrom, browserAppearance, currentTheme, setBrowserTheme, styleWorkspace } from './lib/theme.ts';
+import { appearanceFrom, browserAppearance, browserPreferences, currentTheme, setBrowserTheme, storeBrowserPreferences, styleWorkspace } from './lib/theme.ts';
 import { useChatHistory } from './lib/use-history.ts';
 import { useLibraryHistory } from './lib/use-library-history.ts';
 import { useProjects } from './lib/use-projects.ts';
@@ -58,7 +62,8 @@ type ForkKind = 'edit' | 'reply';
 type Modal = { kind: 'delete'; thread: Thread } | { kind: 'plugins'; intent?: PluginIntent }
   | { kind: 'fork'; turnId: string; fork: ForkKind } | { kind: 'memory'; initial?: string }
   | { kind: 'account'; view?: 'signup' } | { kind: 'projects'; id?: string; file?: string } | { kind: 'chat-options'; id: string }
-  | { kind: 'search' | 'shortcuts' | 'settings' | 'about' | 'mode' | 'context' | 'vision' | 'tasks' | 'sync-conflict' };
+  | { kind: 'search'; chatsOnly?: boolean } | { kind: 'settings'; category?: SettingsCategory; provider?: Provider; connectionFailed?: boolean }
+  | { kind: 'shortcuts' | 'about' | 'context' | 'vision' | 'tasks' | 'sync-conflict' };
 const ProjectsDialog = lazy(() => import('./components/ProjectsDialog.tsx').then(({ ProjectsDialog }) => ({ default: ProjectsDialog })).catch(() => ({
   default: ({ onClose }: { onClose: () => void }) => <Dialog title="Projects unavailable" onClose={onClose}><p>Couldn’t open projects. Refresh to try again.</p></Dialog>,
 })));
@@ -68,24 +73,54 @@ const PluginsDialog = WORKSPACE_PLUGINS_ENABLED ? lazy(() => import('./component
 
 const emptyTurns: Turn[] = [];
 
+function languageForReply(prompt: string, fallback: ReplyLanguage): ReplyLanguage {
+  const translation = readSkillCommand(prompt);
+  if (translation?.id !== 'translate') return fallback;
+  const target = translation.argument.split(':', 1)[0].trim().toLowerCase();
+  const englishNames: Record<Language, string> = { en: 'english', es: 'spanish', fr: 'french', de: 'german', pt: 'portuguese' };
+  return (Object.keys(LANGUAGES) as Language[]).find((id) => target === id || target === LANGUAGES[id].name.toLowerCase() || target === englishNames[id]) ?? 'auto';
+}
+
 const guest = guestAccount();
 
+type ChatStatus = {
+  availability: Availability | 'loading';
+  models: HelioModelId[];
+  samples: HelioModelId[];
+  canSearch: boolean;
+  canResearch: boolean;
+};
+const offlineChat: ChatStatus = { availability: 'unavailable', models: [], samples: [], canSearch: false, canResearch: false };
+
 export default function App() {
-  const [chatStatus, setChatStatus] = useState<{ availability: Availability | 'loading'; canSearch: boolean; canResearch?: boolean }>({ availability: 'loading', canSearch: false });
+  const [chatStatus, setChatStatus] = useState<ChatStatus>({ ...offlineChat, availability: 'loading' });
+  const [modelCheck, setModelCheck] = useState(0);
   useEffect(() => {
     const controller = new AbortController();
-    // Status doesn't depend on identity: verify the session and warm the chat
-    // endpoint in parallel, without showing another account's history.
-    fetch('/api/chat', { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(8_000)]), cache: 'no-store', credentials: PUBLIC_CREDENTIALS })
-      .then(async (response) => {
+    let checkingModels = false;
+    // Status is public and independent of the signed-in session. Recheck so
+    // newly installed models appear without changing or resetting a chat.
+    async function refreshModels() {
+      if (checkingModels || controller.signal.aborted) return;
+      checkingModels = true;
+      try {
+        const response = await fetch('/api/chat', { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(8_000)]), cache: 'no-store', credentials: PUBLIC_CREDENTIALS });
         if (!response.ok) throw new Error('Chat status unavailable');
         const data = await response.json();
         if (controller.signal.aborted) return;
-        const available = (data?.availability === 'server' || data?.availability === 'preview') && data?.models?.includes(DEFAULT_MODEL);
-        setChatStatus({ availability: available ? data.availability : 'unavailable', canSearch: available && data.webSearch === true, canResearch: available && data.research === true });
-      }).catch(() => { if (!controller.signal.aborted) setChatStatus({ availability: 'unavailable', canSearch: false }); });
-    return () => controller.abort();
-  }, []);
+        if (data?.availability !== 'server' && data?.availability !== 'preview') { setChatStatus(offlineChat); return; }
+        const models = Array.isArray(data.models) ? data.models.filter(isHelioModelId) as HelioModelId[] : [];
+        const samples = data.availability === 'preview' ? models : Array.isArray(data.sampleModels) ? data.sampleModels.filter(isHelioModelId) as HelioModelId[] : [];
+        setChatStatus(models.length ? { availability: data.availability, models, samples, canSearch: data.webSearch === true, canResearch: data.research === true } : offlineChat);
+      } catch { if (!controller.signal.aborted) setChatStatus(offlineChat); }
+      finally { checkingModels = false; }
+    }
+    const recheck = () => { if (!document.hidden) void refreshModels(); };
+    void refreshModels();
+    const timer = window.setInterval(recheck, 25_000);
+    document.addEventListener('visibilitychange', recheck);
+    return () => { controller.abort(); window.clearInterval(timer); document.removeEventListener('visibilitychange', recheck); };
+  }, [modelCheck]);
   const [accountLink, setAccountLink] = useState(() => parseAccountLink(window.location.hash));
   useEffect(() => {
     function takeLink() {
@@ -123,12 +158,24 @@ export default function App() {
   // Keep chat, drafts, and memory in a fresh component when the identity changes.
   // No guest history is loaded before the server checks a possible session.
   return <Workspace key={session ? session.account.user?.id ?? 'guest' : 'checking'} account={session?.account ?? guest}
-    checking={!session} chatStatus={chatStatus} accountError={session?.error} onCheckAccount={refresh}
+    checking={!session} chatStatus={chatStatus} onCheckModels={() => setModelCheck((value) => value + 1)} accountError={session?.error} onCheckAccount={refresh}
     accountLink={accountLink} dismissLink={() => setAccountLink(undefined)} />;
 }
 
-function Workspace({ account, checking, chatStatus: { availability, canSearch, canResearch }, accountError, onCheckAccount, accountLink, dismissLink }: { account: AccountStatus; checking: boolean; chatStatus: { availability: Availability | 'loading'; canSearch: boolean; canResearch?: boolean }; accountError?: string; onCheckAccount: () => void; accountLink?: AccountLink; dismissLink: () => void }) {
+function Workspace({ account, checking, chatStatus: { availability, models: availableModels, samples, canSearch: searchConfigured, canResearch: researchConfigured }, accountError, onCheckAccount, onCheckModels, accountLink, dismissLink }: { account: AccountStatus; checking: boolean; chatStatus: ChatStatus; onCheckModels: () => void; accountError?: string; onCheckAccount: () => void; accountLink?: AccountLink; dismissLink: () => void }) {
   const accountId = account.user?.id;
+  const accountName = account.user?.name.trim() || undefined;
+  const [prefs, setPrefs] = useState<WorkspacePreferences>(() => accountId ? account.settings ?? {} : checking ? {} : browserPreferences());
+  const prefsNow = useRef(prefs);
+  const language = prefs.language ?? 'en';
+  const t = labelsFor(language);
+  const replyLanguage = !prefs.replyLanguage || prefs.replyLanguage === 'interface' ? language : prefs.replyLanguage;
+  const voiceLanguage = replyLanguage === 'auto' ? language : replyLanguage;
+  const voice = useVoice(voiceLanguage);
+  const [voiceMode, setVoiceMode] = useState(false);
+  const voiceModeNow = useRef(false);
+  const firstName = prefs.nickname || accountName?.split(/\s+/)[0];
+  useLayoutEffect(() => { document.documentElement.lang = language; }, [language]);
   const [busy, setBusy] = useState(false);
   const [activeId, setActiveId] = useState<string | null>(null);
   const libraryEnabled = !!(accountId && account.library);
@@ -146,7 +193,8 @@ function Workspace({ account, checking, chatStatus: { availability, canSearch, c
   const canSignIn = !!(account.supabase || account.passwords || account.providers.length);
   const blocked = checking || !history.ready;
   const [hasLegacy, setHasLegacy] = useState(() => !!accountId && loadThreads(accountId).length > 0);
-  const [defaultMode, setDefaultMode] = useState(account.settings?.mode ?? DEFAULT_MODE);
+  const defaultMode = prefs.mode ?? DEFAULT_MODE;
+  const defaultEffort = prefs.effort ?? DEFAULT_EFFORT;
   const settingsUpdates = useRef<Promise<void>>(Promise.resolve());
   const settingsLife = useRef<AbortController | null>(null);
   const openJob = useRef<AbortController | undefined>(undefined);
@@ -163,20 +211,46 @@ function Workspace({ account, checking, chatStatus: { availability, canSearch, c
   const repositoryDraft = useRef<RepoWorkbenchDraft | undefined>(undefined);
   const [memory, setMemory] = useState<MemoryProfile | undefined>(() => accountId || checking ? undefined : loadGuestMemory());
   const [memoryError, setMemoryError] = useState('');
+  const [memoryPending, setMemoryPending] = useState(false);
+  const savingMemory = useRef(false);
   const [memoryRequest, setMemoryRequest] = useState(0);
   const [readingFiles, setReadingFiles] = useState(false);
   const [mode, setMode] = useState<ReplyMode>(defaultMode);
-  const [modelChoice, setModelChoice] = useState<ModelChoice>('xyvora');
-  const hostedLabel = modelChoice === 'xyvora' ? undefined : modelChoice === 'auto' ? 'Auto model' : HOSTED_PROVIDERS[modelChoice];
+  const [effort, setEffort] = useState<Effort>(defaultEffort);
+  const [modelSelection, setModelSelection] = useState<ModelTier>();
+  const [needsModelChoice, setNeedsModelChoice] = useState(false);
+  const models = rankedModels(availableModels);
+  const defaultTier = models.findLast((option) => option.available && !samples.includes(option.choice))?.tier ?? 'quick';
+  const model = models.find((option) => option.tier === (modelSelection ?? defaultTier))!;
+  const modelChoice = model.choice;
+  const sampleReply = samples.includes(modelChoice);
+  const liveReplies = model.available && !sampleReply;
+  const canSearch = searchConfigured && liveReplies;
+  const canResearch = researchConfigured && canSearch;
+  function restoreModel(answer?: Answer) {
+    const { tier, needsChoice } = savedModelSelection(answer);
+    setModelSelection(tier);
+    setNeedsModelChoice(needsChoice);
+  }
   const fileJob = useRef<AbortController | null>(null);
-  const [webSearch, setWebSearch] = useState(false);
   const [theme, setTheme] = useState<Theme>(currentTheme);
   const [appearance, setAppearance] = useState(() => accountId ? appearanceFrom(account.settings) : browserAppearance());
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const sidebarOpener = useRef<HTMLButtonElement>(null);
+  const sidebarCloser = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const frame = requestAnimationFrame(() => sidebarCloser.current?.focus({ preventScroll: true }));
+    const narrow = matchMedia('(max-width: 760px)');
+    const reset = () => { if (!narrow.matches) setMobileOpen(false); };
+    narrow.addEventListener('change', reset);
+    return () => { cancelAnimationFrame(frame); narrow.removeEventListener('change', reset); };
+  }, [mobileOpen]);
   const [toast, setToast] = useState('');
   const [modal, setModal] = useState<Modal | null>(null);
   const textarea = useRef<HTMLTextAreaElement>(null);
+  const welcomeMark = useRef<HTMLSpanElement>(null);
   const pane = useRef<HTMLDivElement>(null);
   const controllerRef = useRef<AbortController | null>(null);
   const followReplies = useRef(true);
@@ -211,12 +285,11 @@ function Workspace({ account, checking, chatStatus: { availability, canSearch, c
       setModal({ kind: 'account' });
       setToast('Couldn’t finish sign-in. Try the provider again.');
     }
-    if (!WORKSPACE_PLUGINS_ENABLED || !flag) return;
+    if (!accountId || !flag) return;
     const [provider, result] = flag.split('-');
     if (!isProvider(provider) || (result !== 'connected' && result !== 'failed')) return;
-    setModal({ kind: 'plugins', intent: { id: provider } });
-    if (result === 'failed') setToast(`Couldn’t connect ${PLUGINS[provider].name}. Review consent and try again.`);
-  }, [account, checking, canSignIn]);
+    setModal({ kind: 'settings', category: 'connections', provider, connectionFailed: result === 'failed' });
+  }, [account, accountId, checking, canSignIn]);
 
   useEffect(() => {
     if (!accountId) return;
@@ -266,7 +339,51 @@ function Workspace({ account, checking, chatStatus: { availability, canSearch, c
     setAppearance((previous) => ({ ...previous, [key]: value })); syncSettings({ [key]: value });
   }
   function chooseTheme(value: Theme) { setBrowserTheme(value); syncSettings({ theme: value }); }
-  function chooseDefaultMode(value: ReplyMode) { setDefaultMode(value); setMode(value); syncSettings({ mode: value }); }
+  function choosePrefs(patch: WorkspacePreferences) {
+    const valid = parsePreferences(patch);
+    if (!valid) { setToast('This setting is invalid.'); return; }
+    const next = { ...prefsNow.current, ...valid };
+    prefsNow.current = next; setPrefs(next);
+    if (!accountId && !checking) storeBrowserPreferences(next);
+    syncSettings(valid);
+    if (valid.mode) setMode(valid.mode);
+    if (valid.effort) setEffort(valid.effort);
+    if (valid.language || valid.replyLanguage) resetVoice();
+  }
+  async function changeMemory(enabled: boolean) {
+    const signal = settingsLife.current?.signal;
+    if (!memory || !signal || savingMemory.current) return;
+    savingMemory.current = true; setMemoryPending(true); setMemoryError('');
+    try {
+      const saved = await saveMemory({ ...memory, enabled }, accountId, signal);
+      if (!signal.aborted) setMemory(saved);
+    } catch (error) {
+      if (!signal.aborted) setMemoryError(error instanceof Error ? error.message : 'Could not save memory.');
+    } finally {
+      savingMemory.current = false;
+      if (!signal.aborted) setMemoryPending(false);
+    }
+  }
+  function resetVoice() {
+    voiceModeNow.current = false; setVoiceMode(false); voice.stop();
+  }
+  function speak(id: string, text: string, inLanguage: ReplyLanguage) {
+    if (inLanguage === 'auto') { setToast('Set a reply language in Voice & language, then retry this reply to read it aloud.'); return; }
+    const result = voice.speak(id, text, inLanguage, () => setToast(t('voiceFailed')));
+    if (result === 'missing') setToast(t('noVoice'));
+    else if (result === 'empty') setToast('This reply has no prose to read aloud.');
+    else if (result === 'failed') setToast(t('voiceFailed'));
+  }
+  function toggleVoice() {
+    if (voiceMode) { resetVoice(); return; }
+    if (replyLanguage === 'auto' || !voice.choices.length) {
+      setModal({ kind: 'settings', category: 'voiceLanguage' });
+      if (replyLanguage === 'auto') setToast('Choose a specific reply language to use voice mode.');
+      return;
+    }
+    voiceModeNow.current = true; setVoiceMode(true);
+    setToast(t('voiceHelp'));
+  }
   function importBrowserChats() {
     if (!history.ready || !accountId) return;
     const known = new Set(threads.map(({ id }) => id));
@@ -289,7 +406,7 @@ function Workspace({ account, checking, chatStatus: { availability, canSearch, c
     } else if (pane.current && followReplies.current) pane.current.scrollTop = pane.current.scrollHeight;
   }, [active, modal]);
 
-  const closeModal = () => setModal(null);
+  const closeModal = () => { if (voice.speaking === 'test') voice.stop(); setModal(null); };
   const focusPrompt = () => requestAnimationFrame(() => textarea.current?.focus());
   const stop = () => controllerRef.current?.abort();
   function clearFiles() {
@@ -320,7 +437,6 @@ function Workspace({ account, checking, chatStatus: { availability, canSearch, c
         controller.signal.throwIfAborted();
         setCanAnalyze(status?.hostedVision === true);
         setPhoto(prepared);
-        setWebSearch(false);
         focusPrompt();
       } catch (error) {
         if (!controller.signal.aborted) setToast(error instanceof Error ? error.message : 'Could not read the image.');
@@ -362,10 +478,12 @@ function Workspace({ account, checking, chatStatus: { availability, canSearch, c
     setBranchDraft(null);
     setIsolated(false);
     setMode(defaultMode);
-    setModelChoice('xyvora');
+    setEffort(defaultEffort);
+    setModelSelection(undefined);
+    setNeedsModelChoice(false);
+    resetVoice();
     setDraft('');
     clearFiles();
-    setWebSearch(false);
     setMobileOpen(false);
     closeModal();
     followReplies.current = true;
@@ -394,11 +512,12 @@ function Workspace({ account, checking, chatStatus: { availability, canSearch, c
     jumpToTurn.current = turnId;
     const latest = thread.turns.at(-1);
     setMode(latest?.answers[0]?.replyMode ?? defaultMode);
-    setModelChoice('xyvora');
+    setEffort(latest?.answers[0]?.effort ?? defaultEffort);
+    restoreModel(latest?.answers[0]);
+    resetVoice();
     setIsolated(latest?.contextOnly === true);
     setDraft('');
     clearFiles();
-    setWebSearch(false);
     setMobileOpen(false);
     closeModal();
     followReplies.current = !turnId;
@@ -415,6 +534,14 @@ function Workspace({ account, checking, chatStatus: { availability, canSearch, c
     setThreads((current) => current.map((chat) => chat.id === thread.id ? { ...chat, ...patch, updatedAt } : chat));
     closeModal();
     setToast(patch.archived ? 'Chat archived. Find it with the Archive search filter.' : 'Chat updated.');
+  }
+  function renameThread(thread: Thread, value: string) {
+    const title = chatTitle(value);
+    if (!history.ready || controllerRef.current || !title || title === thread.title) return;
+    openJob.current?.abort(); openJob.current = undefined; setOpeningChat(false);
+    const updatedAt = Date.now();
+    setThreads((current) => current.map((chat) => chat.id === thread.id ? { ...chat, title, updatedAt } : chat));
+    setToast('Chat renamed.');
   }
   function duplicateThread(thread: Thread) {
     if (!history.ready || controllerRef.current || totalChats >= maxChats) return;
@@ -435,6 +562,8 @@ function Workspace({ account, checking, chatStatus: { availability, canSearch, c
     if (fork === 'edit') {
       setDraft(turn.prompt.slice(0, MAX_PROMPT));
       setMode(turn.answers[0]?.replyMode ?? defaultMode);
+      setEffort(turn.answers[0]?.effort ?? defaultEffort);
+      restoreModel(turn.answers[0]);
       setIsolated(turn.contextOnly === true);
       if (carryAttachment && turn.attachment) setFiles([{ ...turn.attachment, id: crypto.randomUUID(), truncated: false }]);
     }
@@ -452,9 +581,19 @@ function Workspace({ account, checking, chatStatus: { availability, canSearch, c
     closeModal();
     setToast('Conversation deleted.');
   }
+  function dismissSidebar() {
+    setMobileOpen(false);
+    requestAnimationFrame(() => sidebarOpener.current?.focus({ preventScroll: true }));
+  }
   function toggleSidebar() {
-    if (matchMedia('(max-width: 760px)').matches) setMobileOpen((open) => !open);
-    else setCollapsed((closed) => !closed);
+    if (matchMedia('(max-width: 760px)').matches) {
+      if (mobileOpen) dismissSidebar();
+      else setMobileOpen(true);
+    } else {
+      setCollapsed(!collapsed);
+      const target = collapsed ? sidebarCloser : sidebarOpener;
+      requestAnimationFrame(() => target.current?.focus({ preventScroll: true }));
+    }
   }
   function openPlugins(intent?: PluginIntent) {
     if (!WORKSPACE_PLUGINS_ENABLED) return;
@@ -477,7 +616,7 @@ function Workspace({ account, checking, chatStatus: { availability, canSearch, c
       if (event.defaultPrevented || event.isComposing || event.repeat) return;
       const key = event.key.toLowerCase();
       const command = (event.metaKey || event.ctrlKey) && !event.altKey;
-      if (key === 'escape') { setMobileOpen(false); return; }
+      if (key === 'escape') { if (!modal && mobileOpen) dismissSidebar(); return; }
       if (modal || (accountLink && !checking)) return;
       if (command && key === 'k' && !event.shiftKey) {
         event.preventDefault(); setMobileOpen(false); setModal({ kind: 'search' });
@@ -493,11 +632,12 @@ function Workspace({ account, checking, chatStatus: { availability, canSearch, c
     }
     window.addEventListener('keydown', keyboard);
     return () => window.removeEventListener('keydown', keyboard);
-  }, [modal, accountLink, checking, defaultMode]);
+  }, [modal, accountLink, checking, defaultMode, defaultEffort, mobileOpen]);
 
   async function run(retry?: Turn, accessCode?: string) {
     const prompt = retry?.prompt ?? draft.trim();
     if (checking || (!history.ready && !temporary) || controllerRef.current || fileJob.current || openingChat || archived || !prompt || retry?.imageName) return;
+    if (libraryEnabled && active && !active.turns.length && !branchDraft && !temporary) { setToast('Reopen this chat before sending a reply.'); return; }
     if (projectId && projectsEnabled && !projectStore.projects) { setToast('Wait for your projects to load, or start a new chat outside the project.'); return; }
     const team = teamAnswerSkill(prompt);
     const picture = retry || team ? undefined : photo;
@@ -512,8 +652,12 @@ function Workspace({ account, checking, chatStatus: { availability, canSearch, c
     if (!temporary && (branchDraft || !active) && totalChats >= maxChats) {
       setToast('Export or delete a saved chat before starting another, or use Temporary chat.'); return;
     }
-    const external = WORKSPACE_PLUGINS_ENABLED && !picture && !team ? workspaceIntent(prompt) : undefined;
-    if (external) {
+    const external = !picture && !team ? workspaceIntent(prompt) : undefined;
+    if (external && isProvider(external.id)) {
+      setModal({ kind: 'settings', category: 'connections', provider: external.id });
+      return;
+    }
+    if (WORKSPACE_PLUGINS_ENABLED && external) {
       // This is a proposal, not a call. The draft and files stay in the composer.
       const file = files[0];
       if (external.id === 'script' && !external.input && files.length === 1 && /\.(js|mjs)$/i.test(file.name)) {
@@ -523,28 +667,34 @@ function Workspace({ account, checking, chatStatus: { availability, canSearch, c
       openPlugins(external);
       return;
     }
+    if (!picture && needsModelChoice) { setToast('Select a Helio model before continuing this earlier chat.'); return; }
     const attached = picture ? undefined : retry ? retry.attachment : combineFiles(files);
-    const searchQuery = picture || team ? undefined : chatSearchQuery(prompt, !retry && webSearch) ?? (allowsSearchToggle(prompt) ? retry?.searchQuery : undefined);
+    const searchQuery = picture || team ? undefined : explicitSearchQuery(prompt) ?? (allowsSearchToggle(prompt) ? retry?.searchQuery : undefined);
     const skill = team ?? (!picture && searchQuery === undefined ? runInstantSkill(prompt, attached?.text) : undefined);
+    if (!picture && !skill && !model.available) { setToast(`${model.name} is unavailable. Choose another model.`); onCheckModels(); return; }
     if (searchQuery !== undefined) {
-      if (isResearchPrompt(prompt) && !canResearch) { setToast('Research briefs are unavailable in this workspace. Use /search for a regular lookup.'); return; }
-      if (!canSearch) { setToast(`Web search needs the live chat on ${XYVORA_SITE}.`); return; }
+      if (isResearchPrompt(prompt) && !canResearch) { setToast('Research briefs are unavailable because SearXNG is not configured.'); return; }
+      if (!canSearch) { setToast('Live web search is not configured in this workspace.'); return; }
       if (!searchQuery.trim() || searchQuery.length > MAX_SEARCH_QUERY) {
         setToast(`Enter 1–${MAX_SEARCH_QUERY} characters for Web search.`);
         return;
       }
     }
     if (libraryEnabled && !temporary && !retry && turns.length >= LIBRARY_MAX_TURNS) { setToast('This conversation has reached its turn limit. Start a new chat or branch from an earlier message.'); return; }
+    voice.stop();
     const historical = retry ? turns.slice(0, -1) : turns;
+    const answerLanguage = skill || picture ? 'en' : languageForReply(prompt, replyLanguage);
     const threadId = active?.id ?? crypto.randomUUID();
     const turnId = retry?.id ?? crypto.randomUUID();
+    const modelMetadata = { model: picture ? DEFAULT_MODEL : modelChoice, ...(!picture && { tier: model.tier }) };
+    if (!picture) setModelSelection(model.tier);
     const turn: Turn = {
       id: turnId, prompt, searchQuery, attachment: attached, imageName: picture?.name,
       // Retrying must not relax the historical turn’s isolation, or the
       // stricter setting the user selected before pressing Retry.
       contextOnly: (retry?.contextOnly || isolated) ? true : undefined,
-      answers: [skill ? { model: DEFAULT_MODEL, content: skill.text, replyMode: mode, state: 'finished', source: 'skill', skill: skill.id }
-        : { model: DEFAULT_MODEL, content: '', replyMode: picture ? undefined : mode, source: picture ? 'vision' : undefined, state: 'working' }],
+      answers: [skill ? { ...modelMetadata, effort, content: skill.text, replyMode: mode, language: 'en', state: 'finished', source: 'skill', skill: skill.id }
+        : { ...modelMetadata, effort, language: answerLanguage, content: '', replyMode: picture ? undefined : mode, source: picture ? 'vision' : undefined, state: 'working' }],
     };
     const thread: Thread = {
       ...active, projectId: project?.id ?? (projectsEnabled ? undefined : active?.projectId),
@@ -557,10 +707,10 @@ function Workspace({ account, checking, chatStatus: { availability, canSearch, c
       setBranchDraft(null);
       setActiveId(threadId);
     }
-    if (!retry && !picture) { setDraft(''); clearFiles(); setWebSearch(false); }
+    if (!retry && !picture) { setDraft(''); clearFiles(); }
     followReplies.current = true;
     focusPrompt();
-    if (skill) return;
+    if (skill) { if (voiceModeNow.current) speak(`${turnId}:0`, skill.text, 'en'); return; }
 
     const controller = new AbortController();
     controllerRef.current = controller;
@@ -574,6 +724,7 @@ function Workspace({ account, checking, chatStatus: { availability, canSearch, c
       else setThreads((current) => current.map(apply));
     };
     let content = '';
+    let spokenLanguage = answerLanguage;
     let frame = 0;
     try {
       if (WORKSPACE_PLUGINS_ENABLED && picture) {
@@ -583,24 +734,31 @@ function Workspace({ account, checking, chatStatus: { availability, canSearch, c
         if (typeof result.text !== 'string') throw new ChatError('Image analysis did not return a reply.');
         content = result.text.slice(0, 4_000);
         if (content.trim()) { setPhoto(undefined); setDraft(''); }
-      } else await streamChat(buildMessages(historical, turn, mode), controller.signal, {
-        searchQuery, attachment: attached, mode,
-        project: project && accountId && !turn.contextOnly && !temporary && (availability === 'server' || modelChoice !== 'xyvora') ? { id: project.id, accountId, includeFiles: useProjectFiles } : undefined,
-        memory: projectId || readSkillCommand(prompt)?.id === 'translate' ? undefined : memoryForSend(memory, temporary, !!turn.contextOnly),
+      } else await streamChat(buildMessages(historical, turn, effort === 'low' ? 'instant' : mode), controller.signal, {
+        searchQuery, attachment: attached, mode, effort, language: replyLanguage, autoSearch: prefs.autoSearch !== false && !temporary && !projectId && !turn.contextOnly && !attached,
+        project: project && accountId && !turn.contextOnly && !temporary && liveReplies ? { id: project.id, accountId, includeFiles: useProjectFiles } : undefined,
+        memory: projectId || savingMemory.current || readSkillCommand(prompt)?.id === 'translate' ? undefined : memoryForSend(memory, temporary, !!turn.contextOnly),
         onText: (delta) => {
           if (controller.signal.aborted) return;
           content = (content + delta).slice(0, 36_000);
           if (!frame) frame = requestAnimationFrame(() => { frame = 0; update({ content }); });
         },
-        onSource: (source, skill) => update({ source, skill }),
-        hosted: modelChoice !== 'xyvora' && accountId ? { choice: modelChoice, accountId } : undefined,
-        onModel: (hostedModel) => update({ hostedModel }),
+        onSource: (source, skill) => {
+          if (source === 'preview') spokenLanguage = replyLanguage === 'auto' ? 'en' : replyLanguage;
+          if ((source === 'skill' && skill !== 'search') || (source === 'clock' || source === 'skill') && spokenLanguage === 'auto') spokenLanguage = 'en';
+          update({ source, skill, language: spokenLanguage });
+        },
+        onSearching: () => update({ webSearched: true }),
+        model: modelChoice,
+        onLocalModel: (localModel) => update({ localModel }),
         onSources: (sources) => update({ sources }),
       });
       controller.signal.throwIfAborted();
       if (!content.trim()) throw new ChatError('The server returned an empty reply. Try rephrasing your question.');
       update({ state: 'finished', content });
+      if (voiceModeNow.current) speak(`${turnId}:0`, content, spokenLanguage);
     } catch (error) {
+      if (error instanceof ChatError && error.code === 'MODEL_UNAVAILABLE') onCheckModels();
       if (controller.signal.aborted) update({ state: 'stopped', content });
       else update({ state: 'error', content, error: error instanceof Error && (picture || error instanceof ChatError) ? brandAnswer(error.message) : 'The connection was interrupted. Try again.' });
     } finally {
@@ -610,16 +768,18 @@ function Workspace({ account, checking, chatStatus: { availability, canSearch, c
   }
 
   const composer = <Composer draft={draft} onDraft={setDraft} textarea={textarea} files={files} photo={photo} filePicker={filePicker} checking={checking || openingChat || (!history.ready && !temporary)} canAnalyze={canAnalyze}
-    usesMemory={!projectId && readSkillCommand(draft)?.id !== 'translate' && !!memoryForSend(memory, temporary, isolated)} onRemovePhoto={() => setPhoto(undefined)} onAttach={(items) => void attachFiles(items)}
+    usesMemory={!memoryPending && !projectId && readSkillCommand(draft)?.id !== 'translate' && !!memoryForSend(memory, temporary, isolated)} onRemovePhoto={() => setPhoto(undefined)} onAttach={(items) => void attachFiles(items)}
     onRemoveFile={(id) => setFiles((current) => current.filter((file) => file.id !== id))} readingFiles={readingFiles}
-    mode={mode} hostedLabel={hostedLabel} onMode={() => setModal({ kind: 'mode' })} onSend={() => void run()} onStop={stop} busy={busy} isolated={isolated} webSearch={webSearch} canSearch={canSearch}
-    onToggleSearch={() => { setWebSearch((enabled) => !enabled); focusPrompt(); }} />;
+    mode={mode} model={model} needsModelChoice={needsModelChoice} models={models} effort={effort} onEffort={setEffort} sample={samples.includes(DEFAULT_MODEL)}
+    onMode={setMode} onModel={(tier) => { setModelSelection(tier); setNeedsModelChoice(false); }}
+    onContext={() => setModal({ kind: 'context' })} focusPrompt={focusPrompt} welcomeMark={welcomeMark}
+    onSend={() => void run()} onStop={stop} busy={busy} isolated={isolated} canSearch={canSearch}
+    voiceMode={voiceMode} voiceAvailable={voice.choices.length > 0 && replyLanguage !== 'auto'} onVoiceMode={toggleVoice} />;
   function pickPrompt(prompt: string, search = false) {
     if (archived) setNew();
     setMobileOpen(false);
     if (search && photo) { setToast('Remove the attached image before using Web search.'); return; }
-    if (search && !canSearch) { setToast(`Web search needs the live chat on ${XYVORA_SITE}.`); return; }
-    setWebSearch(search);
+    if (search && !canSearch) { setToast('Live web search is not configured in this workspace.'); return; }
     if (prompt) setDraft(prompt);
     focusPrompt();
   }
@@ -627,10 +787,19 @@ function Workspace({ account, checking, chatStatus: { availability, canSearch, c
   function insertToolOutput(content: string) {
     if (archived) setNew();
     else clearFiles();
-    setWebSearch(false);
     setDraft(`Tool output (reference data):\n\n${fencedText(content.slice(0, MAX_PROMPT - 100))}`.slice(0, MAX_PROMPT));
     closeModal();
     focusPrompt();
+  }
+
+  function addConnectionResult(content: string) {
+    if (blocked || busy || readingFiles || photo || files.length >= MAX_FILES) { setToast('Finish the current reply or remove an attachment before adding the result.'); return; }
+    if (archived) setNew();
+    const file = { name: 'Approved app result.txt', text: content.slice(0, MAX_ATTACHMENT), id: crypto.randomUUID(), truncated: false };
+    if (archived) setFiles([file]); else setFiles((current) => [...current, file]);
+    const intent = workspaceIntent(draft);
+    if (archived || !draft.trim() || intent && isProvider(intent.id)) setDraft('Summarize the approved app result. Use only the fields provided.');
+    closeModal(); focusPrompt();
   }
 
   function attachRepoFile(attachment: TextAttachment, copy: RepoWorkbenchDraft) {
@@ -640,41 +809,40 @@ function Workspace({ account, checking, chatStatus: { availability, canSearch, c
     if (archived) { setNew(); setFiles([file]); }
     else setFiles((current) => [...current, file]);
     if (/^\/repo(?:\s|$)/i.test(draft.trim())) setDraft('');
-    setWebSearch(false);
     repositoryDraft.current = copy;
     closeModal(); focusPrompt();
     setToast('Repository text added to the draft.');
   }
 
-  return <div className={`app-shell${collapsed ? ' sidebar-collapsed' : ''}${mobileOpen ? ' sidebar-open' : ''}`}>
+  const locationLabel = temporary ? 'Temporary chat' : branchDraft ? 'New branch' : active?.title ?? project?.name;
+  const serviceLabel = availability === 'server' ? 'Online' : availability === 'preview' ? t('sample') : availability === 'loading' ? 'Connecting' : 'Chat offline';
+  return <Locale.Provider value={language}><div className={`app-shell${collapsed ? ' sidebar-collapsed' : ''}${mobileOpen ? ' sidebar-open' : ''}`}>
     <a href="#main-workspace" className="skip-link">Skip to chat</a>
-    <button type="button" className="mobile-overlay" onClick={() => setMobileOpen(false)} aria-label="Close sidebar"><span /></button>
-    <Sidebar threads={sidebarThreads} activeId={activeId} availability={availability} temporary={temporary} memoryOn={memory?.enabled === true} signedIn={!!accountId} onMemory={() => openMemory()} onNew={setNew}
+    <button type="button" className="mobile-overlay" onClick={dismissSidebar} tabIndex={-1} aria-label="Dismiss sidebar" />
+    <Sidebar threads={sidebarThreads} activeId={activeId} availability={availability} temporary={temporary} memoryOn={memory?.enabled === true} accountName={accountName} onMemory={() => openMemory()} onNew={setNew}
       onTemporary={() => { if (temporary) { setMobileOpen(false); focusPrompt(); } else startChat(true); }}
-      onSearch={() => { setMobileOpen(false); setModal({ kind: 'search' }); }} onProjects={projectsEnabled ? () => openProjects() : undefined} projectName={project?.name} onWebSearch={() => pickPrompt('/search ', true)}
+      onSearch={() => { setMobileOpen(false); setModal({ kind: 'search' }); }} onFilter={() => { setMobileOpen(false); setModal({ kind: 'search', chatsOnly: true }); }}
+      onProjects={projectsEnabled ? () => openProjects() : undefined} projectName={project?.name}
       onPlugins={WORKSPACE_PLUGINS_ENABLED ? () => openPlugins() : undefined} onRepo={WORKSPACE_PLUGINS_ENABLED ? () => openPlugins({ id: 'repo' }) : undefined}
       onImage={WORKSPACE_PLUGINS_ENABLED ? () => openPlugins({ id: 'image' }) : undefined} onTasks={account.background ? () => { setMobileOpen(false); setModal({ kind: 'tasks' }); } : undefined}
       onSettings={() => { setMobileOpen(false); setModal({ kind: 'settings' }); }}
-      syncLabel={history.loading ? 'Loading saved chats…' : history.unsynced ? 'Sync pending' : history.ready ? 'Cloud history' : 'History unavailable'} onCollapse={toggleSidebar} onThread={showThread} onDelete={(thread) => setModal({ kind: 'delete', thread })}
+      syncLabel={history.loading ? 'Loading saved chats…' : history.unsynced ? 'Sync pending' : history.ready ? 'Cloud history' : 'History unavailable'} onCollapse={toggleSidebar} closeControl={sidebarCloser} onThread={showThread} onRename={renameThread} canRename={history.ready && !busy} onDelete={(thread) => setModal({ kind: 'delete', thread })}
       onMore={libraryEnabled && libraryHistory.hasMore && !project ? () => void libraryHistory.more() : undefined} paging={libraryHistory.paging} pageError={libraryHistory.pageError}
       onAbout={() => { setMobileOpen(false); setModal({ kind: 'about' }); }} />
-    <main className={`workspace${turns.length ? ' has-chat' : ''}`} id="main-workspace">
+    <main className={`workspace${turns.length ? ' has-chat' : ''}`} id="main-workspace" inert={mobileOpen}>
       <header className="topbar">
         <div className="topbar-location">
-          <button type="button" className="icon-button open-sidebar" onClick={toggleSidebar} title="Open sidebar" aria-label="Open sidebar" aria-controls="workspace-sidebar"><PanelLeftOpen size={19} /></button>
-          <span className="topbar-workspace">{XYVORA_NAME}</span><span className="breadcrumb-divider">/</span>
-          <strong>{archived ? 'Archive' : temporary ? 'Temporary' : branchDraft ? 'Branch' : project ? 'Project' : 'Chat'}</strong>
+          <button ref={sidebarOpener} type="button" className="icon-button open-sidebar" onClick={toggleSidebar} title="Open sidebar" aria-label="Open sidebar" aria-controls="workspace-sidebar" aria-expanded={mobileOpen}><PanelLeftOpen size={17} /></button>
+          {locationLabel ? <span className="topbar-title" title={locationLabel} onDoubleClick={() => { if (active && !temporary && !branchDraft && !busy) setModal({ kind: 'chat-options', id: active.id }); }}>{locationLabel}</span> : <span className="topbar-brand">{XYVORA_NAME}</span>}
         </div>
         <div className="topbar-actions">
-          {EARLY_ACCESS && <form className="preview-lock" method="post" action="/_xyvora/relock"><button className="secondary-button" type="submit" aria-label="Lock preview" title="End early access in this browser"><LockKeyhole size={14} /><span>Lock preview</span></button></form>}
-          {WORKSPACE_PLUGINS_ENABLED && <button type="button" className="plugins-button" aria-label="Plugins" aria-haspopup="dialog" aria-keyshortcuts="Control+/ Meta+/" onClick={() => openPlugins()}><Blocks size={16} /><span>Plugins</span></button>}
-          {!archived && <button type="button" className={`context-button${isolated ? ' context-isolated' : ''}`} aria-label="Message context" title={isolated ? 'Message context: This message only' : 'Message context: Recent chat'} aria-haspopup="dialog" disabled={busy} onClick={() => setModal({ kind: 'context' })}><ListTree size={16} /><span>Context</span></button>}
+          {WORKSPACE_PLUGINS_ENABLED && <button type="button" className="icon-button" aria-label="Plugins" title="Plugins" aria-haspopup="dialog" aria-keyshortcuts="Control+/ Meta+/" onClick={() => openPlugins()}><Blocks size={16} /></button>}
           {active && !temporary && !branchDraft && turns.length > 0 && <button type="button" className="icon-button export-button" aria-label="Chat options" title="Chat options" disabled={busy} onClick={() => setModal({ kind: 'chat-options', id: active.id })}><MoreHorizontal size={18} /></button>}
           {active && !temporary && !branchDraft && turns.length > 0 && <button type="button" className="icon-button export-button" aria-label="Download conversation as Markdown" title="Download conversation as Markdown" onClick={() => downloadConversation(active)}><Download size={17} /></button>}
-          <button type="button" className="identity-button" aria-label={accountId ? 'Your account' : canSignIn || checking ? 'Sign in' : 'Guest workspace'} aria-haspopup="dialog" title={accountId ? 'Your account' : canSignIn ? 'Sign in or create an account' : 'Guest workspace'}
-            disabled={checking} onClick={openAccount}><UserRound size={16} /><span>{accountId ? 'Account' : canSignIn || checking ? 'Sign in' : 'Guest'}</span></button>
-          <span className="topbar-divider" aria-hidden="true" />
-          <button type="button" className="icon-button theme-toggle" aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`} title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`} onClick={toggleTheme}>{theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}</button>
+          <button type="button" className={`icon-button${!accountId && canSignIn ? ' sign-in-trigger' : ''}`} aria-label={t(accountId ? 'yourAccount' : canSignIn || checking ? 'signIn' : 'guest')} aria-haspopup="dialog" title={accountId ? 'Your account' : canSignIn ? 'Sign in or create an account' : 'Guest workspace'}
+            disabled={checking} onClick={openAccount}><UserRound size={16} />{!accountId && canSignIn && <span>{t('signIn')}</span>}</button>
+          <button type="button" className="icon-button theme-toggle" aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`} title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`} onClick={toggleTheme}>{theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}</button>
+          {EARLY_ACCESS && <form className="preview-lock" method="post" action="/_xyvora/relock"><button className="icon-button" type="submit" aria-label="Lock preview" title="Lock preview"><LockKeyhole size={15} /></button></form>}
         </div>
       </header>
       {history.problem && <aside className="chat-notice sync-notice" aria-label="Saved history">
@@ -685,8 +853,8 @@ function Workspace({ account, checking, chatStatus: { availability, canSearch, c
       {openingChat && <p className="cloud-loading" role="status">Opening conversation…</p>}
       {history.loading && <p className="cloud-loading" role="status">Loading saved chats…</p>}
       {temporary && <aside className="chat-notice" aria-label="Temporary chat privacy"><Shield size={17} /><div><strong>Temporary chat</strong><p>Not saved in history and never uses memory. Messages and attachments can still be sent for replies.</p></div><button type="button" className="secondary-button" aria-label="End temporary chat" onClick={setNew}>End chat</button></aside>}
-      {project && <aside className="chat-notice project-chat-notice" aria-label="Project context"><Folder size={16} /><div><button type="button" className="text-button project-name" onClick={() => openProjects(project.id)}>{project.name}</button><p>{isolated ? 'This message only: project instructions and files are off.' : availability === 'preview' ? 'Private project · sample replies don’t use project context.' : 'Project instructions and selected excerpts can inform replies.'}</p></div>
-        {!archived && <label className="project-context-toggle"><input type="checkbox" checked={useProjectFiles && !isolated && availability === 'server' && !!project.fileCount} disabled={isolated || busy || availability !== 'server' || !project.fileCount} onChange={(event) => setUseProjectFiles(event.target.checked)} /><span>Use project files</span></label>}
+      {project && <aside className="chat-notice project-chat-notice" aria-label="Project context"><Folder size={16} /><div><button type="button" className="text-button project-name" onClick={() => openProjects(project.id)}>{project.name}</button><p>{isolated ? 'This message only: project instructions and files are off.' : sampleReply ? 'Private project · sample replies don’t use project context.' : 'Project instructions and selected excerpts can inform replies.'}</p></div>
+        {!archived && <label className="project-context-toggle"><input type="checkbox" checked={useProjectFiles && !isolated && liveReplies && !!project.fileCount} disabled={isolated || busy || !liveReplies || !project.fileCount} onChange={(event) => setUseProjectFiles(event.target.checked)} /><span>Use project files</span></label>}
       </aside>}
       {branchDraft && <aside className="chat-notice" aria-label="Branch draft"><GitBranch size={17} /><div><strong>New branch</strong><p>Your original stays intact. This branch is saved separately when you send.</p></div><button type="button" className="secondary-button" aria-label="Cancel branch" onClick={cancelFork}>Cancel</button></aside>}
       {turns.length > 0 && active ? <>
@@ -694,40 +862,47 @@ function Workspace({ account, checking, chatStatus: { availability, canSearch, c
           const { scrollHeight, scrollTop, clientHeight } = event.currentTarget;
           followReplies.current = scrollHeight - scrollTop - clientHeight < 130;
         }}><Transcript thread={active} busy={busy} onRetry={archived || branchDraft ? undefined : () => void run(turns.at(-1))}
-          onFork={archived || temporary || branchDraft ? undefined : openFork} onAlert={setToast} /></div>
+          onFork={archived || temporary || branchDraft ? undefined : openFork} onAlert={setToast} speaking={voice.speaking}
+          onSpeak={voice.supported ? (id, text, lang) => voice.speaking === id ? voice.stop() : speak(id, text, lang ?? 'en') : undefined} /></div>
         <div className="bottom-composer"><div className="compose-width">{archived ? <div className="archive-notice"><span>{active.mode === 'compare' ? 'Earlier comparison · read-only' : 'Archived conversation'}</span>{active.archived && active.mode !== 'compare'
           ? <button type="button" className="secondary-button" onClick={() => patchThread(active, { archived: undefined })}>Restore chat</button>
           : <button type="button" className="secondary-button" onClick={setNew}>New chat</button>}</div> : composer}</div></div>
       </> : <div className="welcome-scroll">
-        <div className="welcome">
-          <div className="welcome-heading">
-            <BrandLockup />
-            <span className="workspace-kicker"><Sparkles size={13} strokeWidth={2.1} /> {EARLY_ACCESS ? 'XYVORA EARLY ACCESS' : XYVORA_SLOGAN}</span>
-            {EARLY_ACCESS ? <><h1>What can I help with?</h1><p>A quiet space to think, write, and make things.</p></> : <><h1>What’s on your mind<span>?</span></h1><p>Ask a question, bring a file, or make something with <strong>{XYVORA_NAME}</strong>.</p></>}
+        <div className="welcome-stage">
+          <a className="workspace-badge" href="/status" title="View service status">
+            <span className={`status-dot status-${availability}`} aria-hidden="true" />
+            <span>{EARLY_ACCESS ? 'Early access' : 'Workspace'}</span><span aria-hidden="true">·</span><span className="badge-value">{serviceLabel}</span>
+          </a>
+          <div className="welcome">
+            <div className="welcome-heading">
+              <WelcomeMark motionRef={welcomeMark} />
+              <h1>{firstName && firstName.length <= 28 ? `${t('welcomeName')}${firstName}` : t(EARLY_ACCESS ? 'help' : 'hello')}</h1>
+            </div>
+            {composer}
+            <Suggestions onPick={pickPrompt} onImage={WORKSPACE_PLUGINS_ENABLED ? () => openPlugins({ id: 'image' }) : undefined} />
+            {!accountId && canSignIn && <p className="welcome-account">Pick up where you left off on any device.
+              <button type="button" className="text-button" onClick={() => setModal({ kind: 'account', view: 'signup' })}>{t('signUp')} <span aria-hidden="true">↗</span></button>
+            </p>}
           </div>
-          {composer}
-          <Suggestions onPick={pickPrompt} onImage={WORKSPACE_PLUGINS_ENABLED ? () => openPlugins({ id: 'image' }) : undefined} />
-          <p className="workspace-tip">Try <code>/tools</code> for built-in tools, or ask “What time is it in Tokyo?”</p>
-          {!accountId && canSignIn && <p className="welcome-account">Pick up where you left off on any device.
-            <button type="button" className="text-button" onClick={() => setModal({ kind: 'account', view: 'signup' })}>Create an account <span aria-hidden="true">↗</span></button>
-          </p>}
         </div>
       </div>}
       <SiteFooter />
     </main>
-    {modal?.kind === 'search' && <CommandPalette threads={threads} accountId={accountId} library={libraryEnabled} projects={projectStore.projects} recent={recentSearch}
+    {modal?.kind === 'search' && <CommandPalette threads={threads} accountId={accountId} library={libraryEnabled} projects={projectStore.projects} recent={recentSearch} chatsOnly={modal.chatsOnly}
       onRemember={(query) => setRecentSearch((previous) => [query, ...previous.filter((item) => item !== query)].slice(0, 4))} onClose={closeModal} onThread={showThread} onProject={openProjects}
       commands={[
-        { id: 'new', label: 'New chat', keywords: 'create conversation', run: setNew },
-        { id: 'temporary', label: 'Temporary chat', keywords: 'private scratch', run: () => startChat(true) },
-        { id: 'settings', label: 'Workspace settings', keywords: 'preferences appearance theme', run: () => setModal({ kind: 'settings' }) },
+        { id: 'new', label: t('newChat'), keywords: 'create conversation', run: setNew },
+        { id: 'temporary', label: t('temporary'), keywords: 'private scratch', run: () => startChat(true) },
+        { id: 'settings', label: t('settings'), keywords: 'preferences appearance theme', run: () => setModal({ kind: 'settings' }) },
         { id: 'account', label: accountId ? 'Your account' : canSignIn ? 'Sign in' : 'Guest workspace', keywords: 'profile security identity', run: openAccount },
         { id: 'memory', label: 'Manage memory', keywords: 'personalization notes', run: () => openMemory() },
         { id: 'shortcuts', label: 'Keyboard shortcuts', keywords: 'keys help', run: () => setModal({ kind: 'shortcuts' }) },
+        { id: 'tools', label: 'Built-in tools', keywords: 'calculator tool guide utility', run: () => { closeModal(); pickPrompt('/tools'); } },
         ...(projectsEnabled ? [{ id: 'project-list', label: 'Manage projects', keywords: 'new project folders documents', run: () => openProjects() }] : []),
         ...(account.background ? [{ id: 'tasks', label: 'Background tasks', keywords: 'jobs queue', run: () => setModal({ kind: 'tasks' }) }] : []),
         ...(canResearch ? [{ id: 'research', label: 'Research brief', keywords: 'source report citations', run: () => { closeModal(); pickPrompt('/research ', true); } }] : []),
         ...(canSearch ? [{ id: 'web', label: 'Web search', keywords: 'internet research', run: () => { closeModal(); pickPrompt('/search ', true); } }] : []),
+        { id: 'connections', label: t('connections'), keywords: 'oauth gmail vercel', run: () => setModal({ kind: 'settings', category: 'connections' }) },
         ...(WORKSPACE_PLUGINS_ENABLED ? [{ id: 'plugins', label: 'Plugins', keywords: 'integrations connections', run: () => openPlugins() }] : []),
       ]} />}
     {modal?.kind === 'chat-options' && optionsChat && <ChatOptionsDialog key={optionsChat.id} thread={optionsChat} projects={projectStore.projects} canDuplicate={history.ready && totalChats < maxChats}
@@ -738,8 +913,11 @@ function Workspace({ account, checking, chatStatus: { availability, canSearch, c
         onRemove={(id) => { projectStore.setProjects((items) => items?.filter((item) => item.id !== id)); projectStore.refresh(); if (projectSelection === id) setProjectSelection(undefined); }}
         onStart={(item) => { projectStore.setProjects((items) => [item, ...(items ?? []).filter(({ id }) => id !== item.id)]); startChat(false, item.id); }} onChat={showThread} onClose={() => { closeModal(); projectStore.refresh(); }} />
     </Suspense>}
-    {modal?.kind === 'settings' && <SettingsDialog theme={theme} appearance={appearance} onAppearance={chooseAppearance} count={totalChats} signedIn={!!accountId} canSignIn={canSignIn} defaultMode={defaultMode} onDefaultMode={chooseDefaultMode}
-      onAccount={openAccount} onMemory={() => openMemory()} onTheme={chooseTheme} onShortcuts={() => setModal({ kind: 'shortcuts' })} onImport={hasLegacy ? importBrowserChats : undefined} onClose={closeModal}
+    {modal?.kind === 'settings' && <SettingsDialog key={`${modal.category ?? 'profile'}:${modal.provider ?? ''}`} initial={modal.category} initialProvider={modal.provider} connectionFailed={modal.connectionFailed}
+      account={account} canSignIn={canSignIn} theme={theme} appearance={appearance} onAppearance={chooseAppearance} onTheme={chooseTheme} prefs={prefs} onPrefs={choosePrefs}
+      onAccount={openAccount} onSignUp={() => setModal({ kind: 'account', view: 'signup' })} onMemory={() => openMemory()} onMemoryChange={(value) => void changeMemory(value)}
+      memory={memory} memoryPending={memoryPending} memoryError={memoryError} voice={voice} voiceLanguage={voiceLanguage} onSpeech={speak} count={totalChats} canSearch={canSearch}
+      onInsert={addConnectionResult} onShortcuts={() => setModal({ kind: 'shortcuts' })} onImport={hasLegacy ? importBrowserChats : undefined} onClose={closeModal}
       onClear={async () => { if (libraryEnabled) await libraryHistory.clear(); else setThreads([]); setNew(); setToast('Chat history cleared.'); }} />}
     {modal?.kind === 'shortcuts' && <ShortcutsDialog onClose={closeModal} />}
     {modal?.kind === 'tasks' && <TasksDialog accountId={accountId} available={account.background} onSignIn={openAccount} onClose={closeModal} />}
@@ -753,7 +931,6 @@ function Workspace({ account, checking, chatStatus: { availability, canSearch, c
     {modal?.kind === 'context' && <ContextDialog isolated={isolated} onPick={(value) => { setIsolated(value); closeModal(); focusPrompt(); }} onClose={closeModal} />}
     {modal?.kind === 'fork' && forkTurn && <BranchDialog key={forkTurn.id} turn={forkTurn} editing={modal.fork === 'edit'} hasDraft={!!draft.trim() || !!files.length || !!photo}
       onStart={(carry) => startFork(forkTurn, modal.fork, carry)} onClose={closeModal} />}
-    {modal?.kind === 'mode' && <ModeDialog mode={mode} hostedModels={account.hostedModels} model={modelChoice} onModel={setModelChoice} onPick={(value) => { setMode(value); closeModal(); focusPrompt(); }} onClose={closeModal} />}
     {PluginsDialog && modal?.kind === 'plugins' && <Suspense fallback={<Dialog title="Plugins" subtitle="Opening the workspace…" onClose={closeModal}><span role="status">Loading…</span></Dialog>}>
       <PluginsDialog key={modal.intent?.id ?? 'list'} intent={modal.intent} textInput={combineFiles(files)?.text} onInsert={insertToolOutput} onChoosePhoto={pickPhoto} repoDraft={repositoryDraft.current} onRepoFile={attachRepoFile} onClose={closeModal} />
     </Suspense>}
@@ -768,5 +945,5 @@ function Workspace({ account, checking, chatStatus: { availability, canSearch, c
       <div className="dialog-actions"><button type="button" className="secondary-button" onClick={closeModal}>Cancel</button><button type="button" className="danger-button" onClick={() => { history.useCloudCopy(); setNew(); }}>Use cloud {libraryEnabled ? 'version' : 'copies'}</button></div>
     </Dialog>}
     {toast && <div className="toast" role="status">{toast}<button type="button" className="bare-icon" aria-label="Dismiss notice" onClick={() => setToast('')}><X size={16} /></button></div>}
-  </div>;
+  </div></Locale.Provider>;
 }

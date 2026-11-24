@@ -36,7 +36,7 @@
         },
         "responses": {
           "200": {
-            "description": "SSE text deltas, optional sources, and [DONE] on success. A stream may end with an error event instead. Preview deployments can return labeled samples.",
+            "description": "SSE text deltas, optional sources and localModel metadata for runner replies, and [DONE] on success. A stream may end with an error event instead. Preview deployments can return labeled samples.",
             "headers": {
               "X-Xyvora-Source": { "schema": { "type": "string", "enum": ["server", "preview", "clock", "skill"] } },
               "X-Xyvora-Skill": { "description": "Present for an instant skill reply", "schema": { "type": "string" } }
@@ -44,7 +44,9 @@
             "content": { "text/event-stream": { "schema": { "type": "string" }, "example": "data: {\"choices\":[{\"delta\":{\"content\":\"15.21\"}}]}\n\ndata: [DONE]\n\n" } }
           },
           "400": { "$ref": "#/components/responses/Error" },
+          "401": { "$ref": "#/components/responses/Error" },
           "403": { "$ref": "#/components/responses/Error" },
+          "409": { "$ref": "#/components/responses/Error" },
           "413": { "$ref": "#/components/responses/Error" },
           "415": { "$ref": "#/components/responses/Error" },
           "429": {
@@ -69,30 +71,35 @@
         "properties": {
           "assistant": { "type": "object", "properties": { "name": { "type": "string" }, "site": { "type": "string" }, "url": { "type": "string", "format": "uri" } } },
           "availability": { "type": "string", "enum": ["server", "preview", "unavailable"] },
-          "models": { "type": "array", "items": { "type": "string" } },
+          "models": { "type": "array", "items": { "type": "string", "enum": ["xyvora", "helio-2", "helio-3", "helio-4", "helio-5"] }, "description": "Available Helio IDs only; no runner inventory or upstream configuration." },
+          "sampleModels": { "type": "array", "items": { "type": "string", "enum": ["xyvora"] }, "description": "In mixed live/sample previews, these available IDs use labeled samples. If availability is preview, all listed IDs are samples." },
           "modes": { "type": "array", "items": { "$ref": "#/components/schemas/Mode" } },
           "skills": { "type": "array", "items": { "type": "string" } },
-          "webSearch": { "type": "boolean" }
+          "webSearch": { "type": "boolean", "description": "Live SearXNG lookups are configured." },
+          "research": { "type": "boolean", "description": "The /research command can use search snippets." }
         }
       },
       "ChatRequest": {
         "type": "object",
         "required": ["messages"],
         "properties": {
-          "model": { "type": "string", "const": "xyvora", "default": "xyvora" },
+          "model": { "type": "string", "default": "xyvora", "enum": ["xyvora", "helio-2", "helio-3", "helio-4", "helio-5", "qwen-lite", "auto", "openai", "anthropic", "gemini", "compatible"], "description": "Helio 1 is xyvora (qwen-lite is a legacy alias). Helio 2–4 require installed models. Helio 5 requires a separately pinned local reasoning model. None of the Helio IDs use a hosted model provider. The deprecated provider/auto aliases are only for legacy clients and require separate opt-in configuration, a verified session, same-origin JSON and the X-Xyvora-Account header." },
           "mode": { "$ref": "#/components/schemas/Mode", "default": "normal" },
+          "effort": { "type": "string", "enum": ["low", "medium", "high", "extra", "max"], "description": "Independent response budget. Omit for legacy per-style limits." },
+          "language": { "type": "string", "enum": ["en", "es", "fr", "de", "pt", "auto"], "description": "Explicit reply language or match the prompt. Some built-in tools use English." },
+          "autoSearch": { "type": "boolean", "default": false, "description": "Allow a live lookup for an eligible latest prompt. Only the query, never earlier messages, notes, or attachments, goes to SearXNG." },
           "messages": {
             "type": "array", "minItems": 1, "maxItems": 19,
             "description": "Alternate user and assistant, starting and ending with user. 8,000 context characters total, including attachment text; at most 6,000 in the last message.",
             "items": { "type": "object", "required": ["role", "content"], "properties": { "role": { "type": "string", "enum": ["user", "assistant"] }, "content": { "type": "string", "minLength": 1, "maxLength": 8000 } } }
           },
           "timeZone": { "type": "string", "default": "UTC", "description": "Valid IANA zone, e.g. America/Chicago." },
-          "searchQuery": { "type": "string", "minLength": 1, "maxLength": 350, "description": "Optional query, sent to the configured search services when used." },
+          "searchQuery": { "type": "string", "minLength": 1, "maxLength": 350, "description": "Optional explicit query sent to configured SearXNG when used." },
           "memory": { "type": "array", "maxItems": 8, "description": "Optional reference notes supplied by the caller. 1,000 characters total. This is not account memory lookup.", "items": { "type": "string", "maxLength": 220 } },
           "attachment": { "type": "object", "required": ["name", "text"], "properties": { "name": { "type": "string", "minLength": 1, "maxLength": 120 }, "text": { "type": "string", "minLength": 1, "maxLength": 8000 } } }
         }
       },
-      "Error": { "type": "object", "required": ["error"], "properties": { "error": { "type": "string" } } }
+      "Error": { "type": "object", "required": ["error"], "properties": { "error": { "type": "string" }, "code": { "type": "string" } } }
     }
   }
 }

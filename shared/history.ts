@@ -1,5 +1,9 @@
-import { parseHostedModel } from './hosted-models.ts';
-import type { HostedModel } from './hosted-models.ts';
+import { choiceTier, isEffort, isHelioModelId, isModelTier, isReplyLanguage, variantTier } from './experience.ts';
+import type { Effort, HelioModelId, ModelTier, ReplyLanguage } from './experience.ts';
+import { parseHostedModel, parseModelVariant } from './hosted-models.ts';
+import type { HostedModel, ModelVariant } from './hosted-models.ts';
+import { isLocalModelId, parseLocalModel } from './local-models.ts';
+import type { LocalModel } from './local-models.ts';
 import { isProjectId } from './projects.ts';
 import { brandAnswer } from './branding.ts';
 import { wellFormedText } from './stored-text.ts';
@@ -14,12 +18,18 @@ import type { SkillResultId } from './skill-catalog.ts';
 
 // Retain the old archive IDs for migration without turning them into labels.
 const archiveIds = ['smollm', 'qwen', 'gpt-oss', 'mistral'] as const;
-export type SavedModelId = typeof DEFAULT_MODEL | typeof archiveIds[number];
+export type SavedModelId = HelioModelId | typeof archiveIds[number];
 export type ChatMode = 'chat' | 'compare';
 export type Attachment = TextAttachment;
 export type Answer = {
   model: SavedModelId;
   hostedModel?: HostedModel;
+  localModel?: LocalModel;
+  modelVariant?: ModelVariant;
+  tier?: ModelTier;
+  effort?: Effort;
+  language?: ReplyLanguage;
+  webSearched?: true;
   content: string;
   replyMode?: ReplyMode;
   state: 'working' | 'finished' | 'stopped' | 'error';
@@ -36,13 +46,20 @@ export const MAX_TURNS = 30;
 
 function restoreAnswer(raw: unknown): Answer | undefined {
   if (!raw || typeof raw !== 'object') return;
-  const { model, content, state, source, skill, error, sources, replyMode, hostedModel: rawHosted } = raw as Record<string, unknown>;
+  const { model, content, state, source, skill, error, sources, replyMode, tier, effort, language, webSearched, modelVariant: rawVariant, hostedModel: rawHosted, localModel: rawLocal } = raw as Record<string, unknown>;
   const id = model === 'local' || model === 'qwen-lite' ? DEFAULT_MODEL : model;
-  if ((id !== DEFAULT_MODEL && !archiveIds.some((old) => old === id)) || typeof content !== 'string') return;
-  const legacy = id !== DEFAULT_MODEL || model === 'local' || source === 'on-device' || source === 'legacy' || source === 'hosted';
-  const hostedModel = !legacy && source === 'server' ? parseHostedModel(rawHosted) : undefined;
+  if ((!isHelioModelId(id) && !archiveIds.some((old) => old === id)) || typeof content !== 'string') return;
+  const legacy = !isHelioModelId(id) || model === 'local' || source === 'on-device' || source === 'legacy' || source === 'hosted';
+  const local = isLocalModelId(id);
+  const localModel = !legacy && local && source === 'server' ? parseLocalModel(rawLocal) : undefined;
+  const hostedModel = !legacy && !local && source === 'server' ? parseHostedModel(rawHosted) : undefined;
+  const modelVariant = !legacy && !local ? parseModelVariant(rawVariant) : undefined;
+  const savedTier = !legacy && local ? choiceTier(id) : !legacy && isModelTier(tier) ? tier : undefined;
   return {
+    ...(modelVariant && { modelVariant }),
     ...(hostedModel && { hostedModel }),
+    ...(localModel && { localModel }), ...(savedTier && { tier: savedTier }), ...(!legacy && isEffort(effort) && { effort }),
+    ...(!legacy && isReplyLanguage(language) && { language }), ...(webSearched === true && { webSearched: true as const }),
     model: id as SavedModelId, content: safeText(brandAnswer(content), 36_000), replyMode: isReplyMode(replyMode) ? replyMode : DEFAULT_MODE,
     state: state === 'finished' || state === 'error' ? state : 'stopped',
     source: legacy ? 'legacy' : source === 'preview' || source === 'server' || source === 'clock' || source === 'skill' || source === 'vision' ? source : undefined,
@@ -51,6 +68,20 @@ function restoreAnswer(raw: unknown): Answer | undefined {
     error: state !== 'error' ? undefined : legacy ? 'This earlier reply did not finish. You can retry the prompt in a new chat.'
       : typeof error === 'string' ? safeText(brandAnswer(error), 500) : 'The reply did not finish. Try again.',
   };
+}
+
+// Older provider selections cannot be retried implicitly under a new alias.
+// Keep the archived labels in history, but require a new choice to continue.
+export function savedModelSelection(answer?: Answer): { tier: ModelTier; needsChoice: boolean } {
+  if (!answer) return { tier: 'quick', needsChoice: false };
+  if (isLocalModelId(answer.model)) return { tier: choiceTier(answer.model), needsChoice: false };
+  const tier = answer.modelVariant ? variantTier(answer.modelVariant) : answer.tier ?? 'quick';
+  return { tier, needsChoice: !!(answer.modelVariant || answer.hostedModel || tier !== 'quick') };
+}
+
+export function chatTitle(value: unknown) {
+  if (typeof value !== 'string' || value.length > 100 || /[\x00-\x1f\x7f]/.test(value)) return;
+  return wellFormedText(value).trim() || undefined;
 }
 
 export const isThreadId = (id: unknown): id is string => typeof id === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(id);

@@ -19,7 +19,7 @@
   }
   function apply(theme) {
     root.dataset.theme = theme;
-    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'dark' ? '#181621' : '#f8f7fb');
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'dark' ? '#211f1c' : '#fdfbf7');
     label();
     window.dispatchEvent(new CustomEvent('xyvora:theme', { detail: theme }));
   }

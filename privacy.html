@@ -31,10 +31,12 @@
       <section class="info-section info-card" aria-labelledby="providers-title">
         <h2 id="providers-title">Optional providers</h2>
         <ul class="info-list">
-          <li>Web search sends your query to Wiby and Wikipedia. Research briefs may retrieve a matched Wikipedia article’s introduction from Wikipedia. Do not include private data in the query.</li>
+          <li>When configured, web search and research send only the selected query to the workspace’s SearXNG instance, which may query its configured indexes. Automatic search can be turned off in Workspace settings → Replies. Don’t include private data in a query. Xyvora receives snippets, not full pages.</li>
           <li>Identity sign-in exchanges information with the provider you choose: Google, GitHub, or Discord where configured. It does not grant access to external accounts beyond sign-in.</li>
-          <li>If enabled, selecting a hosted text model sends the current prompt and included context to that provider. This can include recent messages, notes, file extracts, and research evidence. Selecting Auto may use a configured hosted provider. The default Xyvora model does not use those providers.</li>
-          <li>Workspace plugins and hosted image tools are paused. Image previews stay on your device. Older saved photo turns can contain the filename and conversation, not the image bytes.</li>
+          <li>Helio 1 uses the bundled model. Where Helio 2–5 are enabled, the current prompt and included context (such as recent messages, notes, file extracts, and search evidence) go to the workspace’s inference server to run an installed model. This is not inference in the visitor’s browser. The Helio selector does not use paid model providers. An older signed-in API integration that explicitly opts into a hosted model can still send context to its configured provider.</li>
+          <li>Optional Gmail and Vercel connections require a verified session, provider consent and approval before each read. Results stay in the settings panel unless you attach and send them. Encrypted connection cookies expire within an hour. Disconnect in Xyvora or revoke the provider grant.</li>
+          <li>Read-aloud uses the selected installed device voice. It does not use your microphone or send the audio or reply to a speech service.</li>
+          <li>General workspace plugins and hosted image tools are paused. Image previews stay on your device. Older saved photo turns can contain the filename and conversation, not the image bytes.</li>
         </ul>
         <p>External services have their own privacy notices. If you previously granted access to an external account, you can revoke that grant in the provider’s own account settings.</p>
       </section>

@@ -1,59 +1,7 @@
-import { Brain, HardDrive, Keyboard, Moon, Sun, Trash2, UserRound } from 'lucide-react';
-import { useState } from 'react';
 import { XYVORA_NAME, XYVORA_SITE, XYVORA_URL } from '../../shared/models.ts';
 import { WORKSPACE_PLUGINS_ENABLED } from '../../shared/workspace-tools.ts';
 import { ABOUT_PATH, SCHOOLS_PATH, TEAM_LINK_LABEL, TEAM_NAME, XYVORA_SLOGAN } from '../../shared/site.ts';
 import { Dialog } from './Dialog.tsx';
-
-import { APPEARANCE } from '../../shared/preferences.ts';
-import type { Appearance, Theme } from '../../shared/preferences.ts';
-import { MODES, MODE_IDS, isReplyMode } from '../../shared/modes.ts';
-import type { ReplyMode } from '../../shared/modes.ts';
-
-export function SettingsDialog({ theme, appearance, onAppearance, count, signedIn, canSignIn, defaultMode, onDefaultMode, onAccount, onMemory, onTheme, onShortcuts, onImport, onClear, onClose }: {
-  theme: Theme; appearance: Appearance; onAppearance: <K extends keyof Appearance>(key: K, value: Appearance[K]) => void; count: number; signedIn: boolean; canSignIn: boolean; defaultMode: ReplyMode; onDefaultMode: (mode: ReplyMode) => void; onShortcuts: () => void; onImport?: () => void; onAccount: () => void; onMemory: () => void; onTheme: (theme: Theme) => void; onClear: () => Promise<void>; onClose: () => void;
-}) {
-  const [confirm, setConfirm] = useState(false);
-  const [clearing, setClearing] = useState(false);
-  const [clearError, setClearError] = useState('');
-  return <Dialog title="Workspace settings" subtitle={signedIn ? "Manage preferences that sync with your account." : "Make Xyvora feel at home on this device."} onClose={() => { if (!clearing) onClose(); }}>
-    <section className="settings-section"><h3>Personalization</h3>
-      <div className="theme-options"><button type="button" className="secondary-button" onClick={onAccount}><UserRound size={16} />{signedIn ? 'Your account' : canSignIn ? 'Sign in' : 'Guest workspace'}</button>
-        <button type="button" className="secondary-button" onClick={onMemory}><Brain size={16} />Manage memory</button></div>
-    </section>
-    <section className="settings-section"><h3>Appearance</h3>
-      <div className="theme-options">
-        {(['light', 'dark'] as const).map((item) => <button type="button" className={`theme-choice${theme === item ? ' active' : ''}`} key={item} onClick={() => onTheme(item)} aria-pressed={theme === item}>
-          {item === 'light' ? <Sun size={17} /> : <Moon size={17} />} {item === 'light' ? 'Light' : 'Dark'}
-        </button>)}
-      </div>
-      <div className="appearance-grid">
-        <label className="field-label">Accent<select className="plugin-input" value={appearance.accent} onChange={(event) => onAppearance('accent', event.target.value as Appearance['accent'])}>{APPEARANCE.accent.map((accent) => <option value={accent} key={accent}>{accent[0].toUpperCase() + accent.slice(1)}</option>)}</select></label>
-        <label className="field-label">Density<select className="plugin-input" value={appearance.density} onChange={(event) => onAppearance('density', event.target.value as Appearance['density'])}><option value="comfortable">Comfortable</option><option value="compact">Compact</option></select></label>
-        <label className="field-label">Text size<select className="plugin-input" value={appearance.textSize} onChange={(event) => onAppearance('textSize', event.target.value as Appearance['textSize'])}><option value="regular">Regular</option><option value="large">Large</option></select></label>
-        <label className="field-label">Workspace font<select className="plugin-input" value={appearance.font} onChange={(event) => onAppearance('font', event.target.value as Appearance['font'])}><option value="xyvora">Xyvora Sans</option><option value="system">System UI</option></select></label>
-      </div>
-    </section>
-    {signedIn && <section className="settings-section"><h3>Replies</h3><label className="field-label">Default reply mode<select className="plugin-input" value={defaultMode} onChange={({ target }) => { if (isReplyMode(target.value)) onDefaultMode(target.value); }}>
-      {MODE_IDS.map((id) => <option key={id} value={id}>{MODES[id].name}</option>)}
-    </select></label></section>}
-    <section className="settings-section history-settings"><div><h3>{signedIn ? 'Cloud history' : 'Local history'}</h3><p>{count === 1 ? '1 conversation' : `${count} conversations`} {signedIn ? 'in your account' : 'on this device'}.</p></div>
-      <button type="button" className="danger-button" disabled={count === 0} onClick={() => setConfirm(true)}><Trash2 size={15} /> Clear history</button>
-    </section>
-    {onImport && <button type="button" className="secondary-button" onClick={onImport}>Import this account’s older browser chats</button>}
-    {confirm && <div className="confirm-box"><p>Delete all saved conversations {signedIn ? 'from your account' : 'on this device'}? This can’t be undone.</p>
-      <div><button type="button" className="secondary-button" disabled={clearing} onClick={() => { setConfirm(false); setClearError(''); }}>Cancel</button><button type="button" className="danger-button" disabled={clearing} onClick={() => {
-        setClearing(true); setClearError('');
-        void onClear().then(() => setConfirm(false)).catch((error) => setClearError(error instanceof Error ? error.message : 'Could not clear history.')).finally(() => setClearing(false));
-      }}>{clearing ? 'Deleting…' : 'Delete all'}</button></div>{clearError && <p role="alert">{clearError}</p>}
-    </div>}
-    <section className="settings-section"><h3>Privacy &amp; data</h3>
-      <div className="theme-options"><a className="secondary-button" href="/cookies">Cookie choices</a><a className="secondary-button" href="/privacy">Privacy policy</a></div>
-    </section>
-    <button type="button" className="secondary-button" aria-keyshortcuts="?" onClick={onShortcuts}><Keyboard size={16} /> Keyboard shortcuts</button>
-    <div className="dialog-note"><HardDrive size={16} /> {signedIn ? 'Guest history stays in this browser and stays separate from your account.' : 'Guest history and preferences stay in this browser.'} Temporary chats don’t enter history.</div>
-  </Dialog>;
-}
 
 export function ShortcutsDialog({ onClose }: { onClose: () => void }) {
   return <Dialog title="Keyboard shortcuts" subtitle="Use Cmd on Mac or Ctrl on Windows, Chromebook, and Linux." onClose={onClose}>
@@ -62,6 +10,7 @@ export function ShortcutsDialog({ onClose }: { onClose: () => void }) {
       <div><dt>New chat</dt><dd><kbd>Cmd / Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>N</kbd></dd></div>
       {WORKSPACE_PLUGINS_ENABLED && <div><dt>Open Plugins</dt><dd><kbd>Cmd / Ctrl</kbd> + <kbd>/</kbd></dd></div>}
       <div><dt>Show keyboard shortcuts</dt><dd><kbd>?</kbd></dd></div>
+      <div><dt>Rename a focused chat</dt><dd><kbd>F2</kbd></dd></div>
       <div><dt>Send a message</dt><dd><kbd>Enter</kbd></dd></div>
       <div><dt>New line in a message</dt><dd><kbd>Shift</kbd> + <kbd>Enter</kbd></dd></div>
     </dl>
@@ -72,13 +21,13 @@ export function ShortcutsDialog({ onClose }: { onClose: () => void }) {
 export function AboutDialog({ onClose }: { onClose: () => void }) {
   return <Dialog title={`About ${XYVORA_NAME}`} subtitle={XYVORA_SLOGAN} onClose={onClose}>
     <div className="about-content">
-      <p><strong>{XYVORA_NAME}</strong> is the assistant at <a href={XYVORA_URL} target="_blank" rel="noopener noreferrer">{XYVORA_SITE}</a>. Choose Instant for a quick reply, Normal for everyday chat, Thinker for comparisons, Pro for technical work, or Creative for ideas. Earlier chats and comparisons remain in your history.</p>
+      <p><strong>{XYVORA_NAME}</strong> is the assistant at <a href={XYVORA_URL} target="_blank" rel="noopener noreferrer">{XYVORA_SITE}</a>. Choose a model for your task and adjust Effort separately. A reply style changes how the answer is presented. Earlier chats and comparisons remain in your history.</p>
       <p>Built by the <strong>{TEAM_NAME}</strong>. <a href={ABOUT_PATH}>{TEAM_LINK_LABEL}</a> · <a href={SCHOOLS_PATH}>Information for schools</a></p>
       <p><strong>Built-in tools:</strong> Ask for math, conversions, time, or help with a file. Type <code>/tools</code> for commands.</p>
-      <p><strong>Web search:</strong> Turn on Web search for a prompt or type <code>/search</code> followed by a query. Results link to their original pages. Search covers the Wiby independent-web index and English Wikipedia; it does not cover every site or guarantee breaking news.</p>
+      <p><strong>Web search:</strong> When configured, Xyvora looks up current information and verifiable facts with SearXNG. Use <code>/search</code> for a specific lookup. The source cards link to the original pages and identify search snippets.</p>
       <p className="brand-downloads"><strong>Brand artwork:</strong> <a href="/brand/xyvora-orbit.svg" download>Orbit SVG</a> · <a href="/brand/xyvora-lockup-4k.webp" download>4K light logo</a> · <a href="/brand/xyvora-lockup-dark-4k.webp" download>4K dark logo</a></p>
       <p><strong>Time and date:</strong> Ask for the time, today’s date, or the time in a city such as Tokyo. Type <code>/time Tokyo</code> for example. The live clock uses your device’s time zone unless you ask for another.</p>
-      <p><strong>Privacy:</strong> Guest history stays in this browser; signed-in history syncs to your account. Temporary chats aren’t saved; their prompts may still be sent for a reply. Built-in tools run on device and aren’t included in later chat context. If signed in, the result can be saved in cloud history. Other replies can send the prompt, recent chat context, attachments, enabled memory notes, and time zone to the server. Temporary chats and This message only never send memory.{WORKSPACE_PLUGINS_ENABLED && ' Hosted image tools send only approved inputs to OpenAI.'} When you use Web search, the query alone is sent to <a href="https://wiby.me/json/" target="_blank" rel="noopener noreferrer">Wiby</a> and <a href="https://foundation.wikimedia.org/wiki/Policy:Privacy_policy" target="_blank" rel="noopener noreferrer">Wikipedia</a> to look up results. Do not include private information in a search.</p>
+      <p><strong>Privacy:</strong> Guest history stays in this browser; signed-in history syncs to your account. Temporary chats aren’t saved; their prompts may still be sent for a reply. Built-in tools run on device and aren’t included in later chat context. If signed in, the result can be saved in cloud history. Other replies can send the prompt, recent chat context, attachments, enabled memory notes, and time zone to the server. Temporary chats and This message only never send memory.{WORKSPACE_PLUGINS_ENABLED && ' Hosted image tools send only approved inputs to OpenAI.'} When web search runs, only the selected query is sent to the workspace’s SearXNG service. You can turn automatic search off in settings. Avoid including private information in a lookup.</p>
     </div>
   </Dialog>;
 }

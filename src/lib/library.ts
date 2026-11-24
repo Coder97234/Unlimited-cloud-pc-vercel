@@ -29,8 +29,18 @@ export async function openLibraryChat(id: string, chat: string, signal: AbortSig
   const data = await accountJson(`${endpoint}&id=${encodeURIComponent(chat)}`, signal, undefined, id);
   return parseEntry(data.entry);
 }
-export async function saveLibraryChat(id: string, chatId: string, before: string | null, chat: Thread | undefined, signal: AbortSignal) {
-  const data = await accountJson(endpoint, signal, { action: chat ? 'save' : 'remove', id: chatId, expected: before, chat }, id);
+export async function saveLibraryChat(id: string, chatId: string, before: LibraryEntry | undefined, chat: Thread | undefined, signal: AbortSignal) {
+  const original = before?.chat;
+  const revision = before?.revision ?? null;
+  // Both a full chat and an unloaded sidebar entry can be renamed. Avoid
+  // resending stored turns for a title-only edit, but preserve other changes.
+  const rename = chat && original && chat.turns === original.turns
+    && chat.mode === original.mode && chat.projectId === original.projectId && chat.pinned === original.pinned
+    && chat.archived === original.archived && chat.favorite === original.favorite;
+  if (chat && !chat.turns.length && !rename) throw new Error('Open this conversation before editing its contents.');
+  const data = await accountJson(endpoint, signal, rename
+    ? { action: 'rename', id: chatId, expected: revision, title: chat.title }
+    : { action: chat ? 'save' : 'remove', id: chatId, expected: revision, chat }, id);
   const result = { ...version(data), entry: data.entry === null ? null : parseEntry(data.entry), conflict: data.conflict === true };
   if (!result.conflict) notifyAccountChange(accountHistoryChangeKey(id));
   return result;

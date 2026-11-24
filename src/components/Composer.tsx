@@ -1,18 +1,18 @@
-import { ArrowUp, Brain, ChevronDown, Globe, Image, LoaderCircle, Paperclip, Plus, ShieldCheck, Square, X } from 'lucide-react';
+import { ArrowUp, Brain, AudioLines, Image, ListTree, LoaderCircle, Paperclip, Plus, ShieldCheck, Square, X } from 'lucide-react';
 import { useLayoutEffect, useRef, useState } from 'react';
 import type { ChangeEvent, RefObject } from 'react';
 import { IMAGE_FILE_ACCEPT, isVisionFile, MAX_VISION_QUESTION } from '../../shared/media.ts';
 import { MAX_PROMPT } from '../../shared/models.ts';
-import { allowsSearchToggle, chatSearchQuery, explicitSearchQuery, MAX_SEARCH_QUERY } from '../../shared/search.ts';
-import { MODES } from '../../shared/modes.ts';
+import { explicitSearchQuery, MAX_SEARCH_QUERY } from '../../shared/search.ts';
+import type { Effort, ModelTier, RankedModel } from '../../shared/experience.ts';
+import { useLabels } from '../lib/labels.ts';
 import type { ReplyMode } from '../../shared/modes.ts';
 import { ACCEPTED_FILES, MAX_FILES } from '../lib/files.ts';
 import type { LocalFile } from '../lib/files.ts';
 import type { VisionPhoto } from '../lib/vision-file.ts';
 import { usePhotoUrl } from './VisionDialog.tsx';
-import { MODE_ICONS } from './ModeDialog.tsx';
 import { floatMascot, typedCompletedWord } from '../lib/mascot-motion.ts';
-import { Mascot } from './Brand.tsx';
+import { ReplyMenu } from './ReplyMenu.tsx';
 
 type Props = {
   draft: string;
@@ -29,29 +29,36 @@ type Props = {
   onRemoveFile: (id: string) => void;
   readingFiles: boolean;
   mode: ReplyMode;
-  onMode: () => void;
-  hostedLabel?: string;
+  onMode: (mode: ReplyMode) => void;
+  model: RankedModel;
+  needsModelChoice: boolean;
+  onModel: (model: ModelTier) => void;
+  models: RankedModel[];
+  effort: Effort;
+  onEffort: (value: Effort) => void;
+  sample: boolean;
+  onContext: () => void;
+  focusPrompt: () => void;
+  welcomeMark: RefObject<HTMLSpanElement | null>;
   onSend: () => void;
   onStop: () => void;
-  webSearch: boolean;
   canSearch: boolean;
-  onToggleSearch: () => void;
+  voiceMode: boolean;
+  voiceAvailable: boolean;
+  onVoiceMode: () => void;
   busy: boolean;
   isolated: boolean;
 };
 
-export function Composer({ draft, onDraft, textarea, files, photo, canAnalyze, onRemovePhoto, filePicker, checking, usesMemory, onAttach, onRemoveFile, readingFiles, mode, onMode, hostedLabel, onSend, onStop, webSearch, canSearch, onToggleSearch, busy, isolated }: Props) {
-  const searchEnabled = allowsSearchToggle(draft);
-  const explicit = explicitSearchQuery(draft) !== undefined;
-  const query = photo ? undefined : chatSearchQuery(draft, webSearch);
+export function Composer({ draft, onDraft, textarea, files, photo, canAnalyze, onRemovePhoto, filePicker, checking, usesMemory, onAttach, onRemoveFile, readingFiles, mode, onMode, model, onModel, needsModelChoice, models, effort, onEffort, sample, onContext, focusPrompt, welcomeMark, onSend, onStop, canSearch, voiceMode, voiceAvailable, onVoiceMode, busy, isolated }: Props) {
+  const t = useLabels();
+  const query = photo ? undefined : explicitSearchQuery(draft);
   const searchTooLong = query !== undefined && query.length > MAX_SEARCH_QUERY;
-  const ModeIcon = MODE_ICONS[mode];
   const [dropping, setDropping] = useState(false);
   const limit = photo ? MAX_VISION_QUESTION : MAX_PROMPT;
-  const canSend = (!photo || canAnalyze) && !checking && !readingFiles && !!draft.trim() && draft.trim().length <= limit && !searchTooLong && (query === undefined || !!query.trim());
+  const canSend = (photo ? canAnalyze : !needsModelChoice) && !checking && !readingFiles && !!draft.trim() && draft.trim().length <= limit && !searchTooLong && (query === undefined || !!query.trim());
   const photoUrl = usePhotoUrl(photo?.blob);
   const attachEnabled = !checking && !busy && !readingFiles && !photo && files.length < MAX_FILES;
-  const mascot = useRef<HTMLSpanElement>(null);
   const beforeComposition = useRef<string | null>(null);
   useLayoutEffect(() => {
     const field = textarea.current;
@@ -99,23 +106,22 @@ export function Composer({ draft, onDraft, textarea, files, photo, canAnalyze, o
       {readingFiles && <span className="attachment-chip" role="status"><LoaderCircle className="file-spinner" size={14} />Preparing attachment…</span>}
     </div>}
     <div className="composer-input-row">
-      <Mascot className="composer-mark" motionRef={mascot} />
       <textarea
         ref={textarea} value={draft} disabled={checking || (!!photo && busy)} maxLength={limit} rows={2}
-        placeholder={photo ? canAnalyze ? 'Ask about this image…' : 'Remove the image to send a text message…' : webSearch ? 'What should I look up?…' : 'Ask Xyvora AI anything…'} aria-label="Message Xyvora"
+        placeholder={photo ? canAnalyze ? 'Ask about this image…' : 'Remove the image to send a text message…' : t('placeholder')} aria-label={t('message')}
         aria-describedby={photo ? 'vision-disclosure' : query !== undefined && canSearch ? 'search-disclosure' : undefined}
         onChange={(event) => {
           const field = event.currentTarget;
           const input = event.nativeEvent as InputEvent;
           if (beforeComposition.current === null && !input.isComposing && !input.inputType?.startsWith('delete')
-            && typedCompletedWord(draft, field.value, field.selectionStart)) floatMascot(mascot.current);
+            && typedCompletedWord(draft, field.value, field.selectionStart)) floatMascot(welcomeMark.current);
           onDraft(field.value);
         }}
         onCompositionStart={() => { beforeComposition.current = draft; }}
         onCompositionEnd={({ currentTarget: field }) => {
           const before = beforeComposition.current;
           beforeComposition.current = null;
-          if (before !== null && typedCompletedWord(before, field.value, field.selectionStart, true)) floatMascot(mascot.current);
+          if (before !== null && typedCompletedWord(before, field.value, field.selectionStart, true)) floatMascot(welcomeMark.current);
         }}
         onKeyDown={(event) => {
           if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
@@ -129,30 +135,33 @@ export function Composer({ draft, onDraft, textarea, files, photo, canAnalyze, o
     <div className="composer-toolbar">
       <div className="composer-tools">
         <input type="file" ref={filePicker} hidden multiple accept={`${ACCEPTED_FILES},${IMAGE_FILE_ACCEPT}`} onChange={attach} />
-        <button type="button" className="attach-button" title="Attach documents or an image" aria-label="Attach files" disabled={!attachEnabled} onClick={() => filePicker.current?.click()}><Plus size={19} /></button>
+        <button type="button" className="attach-button" title="Attach documents or an image" aria-label={t('attach')} disabled={!attachEnabled} onClick={() => filePicker.current?.click()}><Plus size={19} /></button>
         {photo ? <span className="vision-mode"><Image size={15} /> {canAnalyze ? 'Image analysis' : 'Image preview'}</span> : <>
-          <button type="button" className="mode-chip" title={MODES[mode].description} aria-label={`Reply mode: ${MODES[mode].name}`} aria-haspopup="dialog" onClick={onMode} disabled={busy}>
-            <ModeIcon size={15} /><span>{MODES[mode].name}</span><ChevronDown size={13} />
-          </button>
-          <button type="button" className="web-search-chip" aria-label="Web search" aria-pressed={explicit || (searchEnabled && webSearch)} disabled={!canSearch || busy || !searchEnabled || explicit}
-            title={!canSearch ? 'Available on the live site' : explicit ? 'Search command active' : searchEnabled ? 'Search the web with just this prompt' : 'This prompt uses a different tool'} onClick={onToggleSearch}>
-            <Globe size={16} /><span>Web search</span>
-          </button>
+          <div className="composer-context">
+            <button type="button" className={`context-button${isolated ? ' context-isolated' : ''}`} aria-label={t('context')}
+              title={isolated ? 'Message context: This message only' : 'Message context: Recent chat'} aria-haspopup="dialog" disabled={busy || checking} onClick={onContext}>
+              <ListTree size={14} /><span>{t(isolated ? 'oneMessage' : 'chat')}</span>
+            </button>
+          </div>
         </>}
       </div>
       <div className="composer-actions">
+        {!photo && <ReplyMenu mode={mode} model={model} needsModelChoice={needsModelChoice} models={models} effort={effort} onEffort={onEffort} sample={sample} disabled={busy || checking}
+          onMode={onMode} onModel={onModel} onReturnToPrompt={focusPrompt} />}
+        {!photo && <button type="button" className="voice-mode-button" aria-label={t('voiceMode')} aria-pressed={voiceMode} title={voiceAvailable ? t('voiceHelp') : t('noVoice')} disabled={checking} onClick={onVoiceMode}><AudioLines size={17} /></button>}
         {busy
-          ? <button type="button" className="send-button" title="Stop response" aria-label="Stop response" onClick={onStop}><Square size={14} fill="currentColor" /></button>
-          : <button type="submit" className="send-button" title={photo ? 'Review image upload' : 'Send message'} aria-label={photo ? 'Review image upload' : 'Send message'} disabled={!canSend}><ArrowUp size={21} strokeWidth={2.3} /></button>}
+          ? <button type="button" className="send-button" title={t('stop')} aria-label={t('stop')} onClick={onStop}><Square size={14} fill="currentColor" /></button>
+          : <button type="submit" className="send-button" title={photo ? 'Review image upload' : t('send')} aria-label={photo ? 'Review image upload' : t('send')} disabled={!canSend}><ArrowUp size={21} strokeWidth={2.3} /></button>}
       </div>
     </div>
-    {hostedLabel && !photo && <p className="context-disclosure hosted-disclosure"><ShieldCheck size={13} /> <span>{hostedLabel}: your prompt and any included chat, notes, or files may be sent to the selected provider.</span></p>}
+    {!photo && needsModelChoice ? <p className="context-disclosure" role="status">This chat used an earlier model. Choose a Helio model before sending or retrying with recent chat context.</p>
+      : !photo && !model.available ? <p className="context-disclosure" role="status">{model.name} is unavailable for generated replies. Choose another model.</p> : null}
     {isolated && <p className="context-disclosure"><ShieldCheck size={13} /> This message only · Earlier exchanges and saved memory aren’t included.</p>}
     {usesMemory && !photo && <p className="context-disclosure"><Brain size={13} /> Saved memory can be used for this reply.</p>}
     {photo && <p id="vision-disclosure" className="search-disclosure">{!canAnalyze ? 'This is a local preview. Remove the image to send a text message.' : draft.trim().length > limit ? `Keep your question to ${limit} characters.` : 'Review before sending the image and question to OpenAI. No prior chat or memory is sent.'}</p>}
     {files.length > 0 && <p className="search-disclosure">Only extracted text is included when you ask Xyvora about a file. Long files are excerpted.</p>}
     {query !== undefined && canSearch && <p id="search-disclosure" className="search-disclosure">
-      {searchTooLong ? `Keep search queries to ${MAX_SEARCH_QUERY} characters.` : `Only your search query goes to Wiby and Wikipedia, not your attachments or chat history. Don’t include private information.`}
+      {searchTooLong ? `Keep search queries to ${MAX_SEARCH_QUERY} characters.` : `Only your query goes to SearXNG, not your attachments or chat history. Don’t include private information.`}
     </p>}
   </form>;
 }

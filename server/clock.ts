@@ -1,3 +1,5 @@
+import { LANGUAGES } from '../shared/experience.ts';
+import type { ReplyLanguage } from '../shared/experience.ts';
 import { readSkillCommand } from '../shared/skill-catalog.ts';
 
 const cities: Readonly<Record<string, string>> = {
@@ -27,21 +29,30 @@ const dateQuestion = /^(?:(?:what(?:'?s| is)|tell me) (?:the |today's |the curre
 const yearQuestion = /^(?:what year is it|what(?:'s| is) the current year|current year)$/i;
 const zoneQuestion = /^(?:what time ?zone am i in|what(?:'s| is) my time ?zone|my time ?zone)$/i;
 
-export function clockReply(prompt: string, timeZone: string, now: Date): string | undefined {
+export function clockReply(prompt: string, timeZone: string, now: Date, language?: ReplyLanguage): string | undefined {
+  const lang = language && language !== 'auto' ? language : 'en';
+  const locale = LANGUAGES[lang].locale;
   const text = prompt.trim().replace(/’/g, "'").replace(/\s+/g, ' ').replace(/[?!.,]+$/, '').replace(/(?:,? please)$/i, '').trim();
   const command = readSkillCommand(prompt);
-  const time = timeQuestion.exec(text);
-  const date = dateQuestion.exec(text);
-  if (zoneQuestion.test(text)) return `Your chat is using **${timeZone}** from your device's time zone, or UTC if none was provided.`;
-  if (yearQuestion.test(text)) return `It’s **${new Intl.DateTimeFormat('en-US', { timeZone, year: 'numeric' }).format(now)}** in **${timeZone}**.`;
+  const time = timeQuestion.exec(text) ?? /^(?:¿?qu[eé] hora es|quelle heure est-il|wie sp[aä]t ist es|que horas s[aã]o)$/i.exec(text);
+  const date = dateQuestion.exec(text) ?? /^(?:¿?qu[eé] d[ií]a es hoy|quelle est la date aujourd'hui|welches datum haben wir heute|qual [eé] a data de hoje)$/i.exec(text);
+  if (zoneQuestion.test(text)) return lang === 'en' ? `Your chat is using **${timeZone}** from your device's time zone, or UTC if none was provided.` : `**${timeZone}**`;
+  if (yearQuestion.test(text)) {
+    const year = new Intl.DateTimeFormat(locale, { timeZone, year: 'numeric' }).format(now);
+    return lang === 'en' ? `It’s **${year}** in **${timeZone}**.` : `**${year}** (${timeZone}).`;
+  }
   if (command?.id !== 'time' && !time && !date) return;
   const place = command?.id === 'time' ? command.argument : (time || date)?.[1]?.trim();
   const zone = place ? zoneForPlace(place.replace(/ (?:right now|now|rn)$/i, ''), timeZone) : timeZone;
-  if (!zone) return 'I couldn’t match that place to a time zone. Try a city such as Tokyo or a time zone such as `America/Chicago`.';
-  const day = new Intl.DateTimeFormat('en-US', { timeZone: zone, dateStyle: 'full' }).format(now);
-  if (date) return `Today is **${day}** in **${zone}**.`;
-  const localTime = new Intl.DateTimeFormat('en-US', { timeZone: zone, hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }).format(now);
-  return `It’s **${localTime}** on **${day}** in **${zone}**.`;
+  if (!zone) return {
+    en: 'I couldn’t match that place to a time zone. Try a city such as Tokyo or a time zone such as `America/Chicago`.',
+    es: 'No encontré la zona horaria. Prueba con Tokio o `America/Chicago`.', fr: 'Fuseau horaire introuvable. Essayez Tokyo ou `America/Chicago`.',
+    de: 'Die Zeitzone wurde nicht gefunden. Versuche Tokio oder `America/Chicago`.', pt: 'Não encontrei o fuso horário. Experimente Tóquio ou `America/Chicago`.',
+  }[lang];
+  const day = new Intl.DateTimeFormat(locale, { timeZone: zone, dateStyle: 'full' }).format(now);
+  if (date) return lang === 'en' ? `Today is **${day}** in **${zone}**.` : `**${day}** (${zone}).`;
+  const localTime = new Intl.DateTimeFormat(locale, { timeZone: zone, hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }).format(now);
+  return lang === 'en' ? `It’s **${localTime}** on **${day}** in **${zone}**.` : `**${localTime}** · **${day}** (${zone}).`;
 }
 
 export function contextualClock(prompt: string, timeZone: string, now: Date) {

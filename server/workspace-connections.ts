@@ -11,10 +11,16 @@ const providers = {
 } as const;
 const authSeconds = 600;
 const sessionSeconds = 3_600;
+export type ConnectionBinding = {
+  session: string;
+  record: (state: string, provider: Provider, expires: number) => Promise<void>;
+  consume: (state: string, provider: Provider) => Promise<boolean>;
+};
 
 type OAuthClient = { id: string; secret: string };
 export type WorkspaceConfig = {
   origin: string;
+  appConnections?: boolean;
   sessionKey?: Buffer;
   clients: Partial<Record<Provider, OAuthClient>>;
   image?: { key: string; accessCode: string; vision?: boolean };
@@ -41,7 +47,7 @@ export function workspaceConfig(env: Env): WorkspaceConfig {
   }
   const accessCode = env.XYVORA_IMAGE_ACCESS_CODE?.trim(), key = env.XYVORA_IMAGE_API_KEY?.trim();
   const image = key && accessCode && accessCode.length >= 24 && accessCode.length <= 180 ? { key, accessCode, vision: env.XYVORA_ENABLE_VISION === '1' } : undefined;
-  return { origin, sessionKey, clients, image };
+  return { origin, sessionKey, clients, image, appConnections: env.XYVORA_ENABLE_APP_CONNECTIONS === '1' && !!configuredOrigin && Object.keys(clients).length > 0 };
 }
 
 export function equalSecret(a: string, b: string) {
@@ -80,24 +86,26 @@ function unseal(request: Request, config: WorkspaceConfig, name: string) {
 
 const callback = (config: WorkspaceConfig) => `${config.origin}/api/workspace`;
 const onConfiguredOrigin = (request: Request, config: WorkspaceConfig) => new URL(request.url).origin === config.origin;
-function sessionToken(request: Request, config: WorkspaceConfig, provider: Provider) {
+function sessionToken(request: Request, config: WorkspaceConfig, provider: Provider, binding?: ConnectionBinding) {
   if (!onConfiguredOrigin(request, config) || !config.clients[provider]) return;
-  const token = unseal(request, config, connectionCookie(provider))?.token;
-  if (typeof token === 'string') return token;
+  const data = unseal(request, config, connectionCookie(provider));
+  if (data?.session === binding?.session && typeof data?.token === 'string') return data.token;
 }
 
-export function connectionStatus(request: Request, config: WorkspaceConfig, provider: Provider): ConnectionStatus {
+export function connectionStatus(request: Request, config: WorkspaceConfig, provider: Provider, binding?: ConnectionBinding): ConnectionStatus {
   if (!onConfiguredOrigin(request, config) || !config.clients[provider]) return 'unconfigured';
-  return sessionToken(request, config, provider) ? 'connected' : 'disconnected';
+  return sessionToken(request, config, provider, binding) ? 'connected' : 'disconnected';
 }
 
-export function startConnection(request: Request, config: WorkspaceConfig, provider: Provider, headers: Headers) {
+export async function startConnection(request: Request, config: WorkspaceConfig, provider: Provider, headers: Headers, binding?: ConnectionBinding) {
   const client = config.clients[provider];
   if (!onConfiguredOrigin(request, config) || !client) throw new ToolError('This account connection is unavailable.', 503);
   const state = randomBytes(32).toString('base64url');
   const verifier = randomBytes(48).toString('base64url');
   const name = authCookie(provider);
-  headers.append('set-cookie', cookie(name, seal(config, name, { state, verifier, expires: Date.now() + authSeconds * 1_000 }), authSeconds));
+  const expires = Date.now() + authSeconds * 1_000;
+  await binding?.record(state, provider, expires);
+  headers.append('set-cookie', cookie(name, seal(config, name, { state, verifier, expires, session: binding?.session }), authSeconds));
   const auth = new URL(WORKSPACE_AUTH_PATHS[provider]);
   auth.search = new URLSearchParams({
     client_id: client.id, redirect_uri: callback(config), response_type: 'code', state,
@@ -108,7 +116,7 @@ export function startConnection(request: Request, config: WorkspaceConfig, provi
   return auth.href;
 }
 
-export async function finishConnection(request: Request, config: WorkspaceConfig, headers: Headers) {
+export async function finishConnection(request: Request, config: WorkspaceConfig, headers: Headers, binding?: ConnectionBinding) {
   if (!onConfiguredOrigin(request, config)) throw new ToolError('Use the configured Xyvora origin.', 403);
   const params = new URL(request.url).searchParams;
   const state = params.get('state'), code = params.get('code');
@@ -117,13 +125,14 @@ export async function finishConnection(request: Request, config: WorkspaceConfig
   // name (or token URL) supplied by the callback URL or the browser.
   const provider = (['gmail', 'vercel'] as const).find((id) => {
     const pending = unseal(request, config, authCookie(id));
-    return config.clients[id] && typeof pending?.state === 'string' && equalSecret(state, pending.state);
+    return config.clients[id] && typeof pending?.state === 'string' && pending.session === binding?.session && equalSecret(state, pending.state);
   });
   if (!provider) throw new ToolError('No matching account connection. Start again in Xyvora.');
   const client = config.clients[provider]!;
   const pending = unseal(request, config, authCookie(provider));
   let result: 'connected' | 'failed' = 'failed';
   headers.append('set-cookie', cookie(authCookie(provider), '', 0));
+  if (binding && !await binding.consume(state, provider)) throw new ToolError('This connection request has expired. Start again in Xyvora.', 409);
   if (!params.has('error') && code && code.length < 1_600 && /^\S+$/.test(code) && typeof pending?.verifier === 'string') {
     try {
       const data = await providerJson(providers[provider].token, request.signal, {
@@ -136,7 +145,7 @@ export async function finishConnection(request: Request, config: WorkspaceConfig
       if (typeof token !== 'string' || token.length > 2_500 || !/^[\x21-\x7e]+$/.test(token) || age < 1 || !Number.isFinite(age)) throw new ToolError('Invalid provider session.');
       if (provider === 'gmail' && typeof data.scope === 'string' && data.scope.trim() !== gmailScope) throw new ToolError('Unexpected Gmail permissions.');
       const name = connectionCookie(provider);
-      headers.append('set-cookie', cookie(name, seal(config, name, { token, expires: Date.now() + age * 1_000 }), age));
+      headers.append('set-cookie', cookie(name, seal(config, name, { token, expires: Date.now() + age * 1_000, session: binding?.session }), age));
       result = 'connected';
     } catch { /* A failed grant never becomes a connection. */ }
   }
@@ -148,8 +157,16 @@ export function clearConnection(provider: Provider, headers: Headers) {
   headers.append('set-cookie', cookie(connectionCookie(provider), '', 0));
 }
 
-export async function disconnect(request: Request, config: WorkspaceConfig, provider: Provider, headers: Headers) {
-  const token = sessionToken(request, config, provider);
+export function clearAppConnectionCookies(request: Request, headers: Headers) {
+  for (const provider of ['gmail', 'vercel'] as const) {
+    for (const name of [authCookie(provider), connectionCookie(provider)]) {
+      if (readCookie(request, name)) headers.append('Set-Cookie', cookie(name, '', 0));
+    }
+  }
+}
+
+export async function disconnect(request: Request, config: WorkspaceConfig, provider: Provider, headers: Headers, binding?: ConnectionBinding) {
+  const token = sessionToken(request, config, provider, binding);
   clearConnection(provider, headers);
   headers.append('set-cookie', cookie(authCookie(provider), '', 0));
   const client = config.clients[provider];
@@ -163,8 +180,8 @@ export async function disconnect(request: Request, config: WorkspaceConfig, prov
   } catch { return false; } // Clear the local session even when provider revocation fails.
 }
 
-export async function readConnection(request: Request, config: WorkspaceConfig, provider: Provider, operation: string, teamSlug?: unknown) {
-  const token = sessionToken(request, config, provider);
+export async function readConnection(request: Request, config: WorkspaceConfig, provider: Provider, operation: string, teamSlug?: unknown, binding?: ConnectionBinding) {
+  const token = sessionToken(request, config, provider, binding);
   if (!token) throw new ToolError('Connect this account first. The connection may have expired.', 401);
   const options = { headers: { Authorization: `Bearer ${token}` } };
   if (provider === 'gmail' && operation === 'inbox') {

@@ -1,6 +1,7 @@
 import { DEFAULT_MODE, INSTANT_HISTORY_CHARS } from '../../shared/modes.ts';
 import type { ReplyMode } from '../../shared/modes.ts';
-import { DEFAULT_MODEL, MAX_CONTEXT, MAX_MESSAGES, withAttachment } from '../../shared/models.ts';
+import { isHelioModelId } from '../../shared/experience.ts';
+import { MAX_CONTEXT, MAX_MESSAGES, withAttachment } from '../../shared/models.ts';
 import type { ChatMessage } from '../../shared/models.ts';
 import { modelMessage } from '../../shared/skills.ts';
 import { restoreThreads } from '../../shared/history.ts';
@@ -36,7 +37,7 @@ export function buildMessages(previous: Turn[], current: Pick<Turn, 'prompt' | '
   let length = modelMessage(current.prompt, current.attachment).length;
   for (const turn of previous.slice(-9).reverse()) {
     const answer = turn.answers[0];
-    if (turn.contextOnly || !answer || answer.model !== DEFAULT_MODEL || answer.source === 'preview' || answer.source === 'legacy' || answer.source === 'skill' || !answer.content.trim() || answer.state !== 'finished') continue;
+    if (turn.contextOnly || !answer || !isHelioModelId(answer.model) || answer.source === 'preview' || answer.source === 'legacy' || answer.source === 'skill' || !answer.content.trim() || answer.state !== 'finished') continue;
     const priorInput = withAttachment(turn.prompt, turn.attachment) + (turn.imageName ? '\n\n[An image was analyzed then; no image pixels are included now.]' : '');
     const text = answer.content.slice(0, MAX_CONTEXT);
     if (mode === 'instant' && priorInput.length + text.length > INSTANT_HISTORY_CHARS) break;

@@ -1,3 +1,4 @@
+import { isHelioModelId } from '../shared/experience.ts';
 import { MODE_IDS } from '../shared/modes.ts';
 import assert from 'node:assert/strict';
 import { readChatEvents } from '../src/lib/stream.ts';
@@ -10,7 +11,13 @@ const benchmark = process.argv.includes('--benchmark');
 const url = new URL('/api/chat', target);
 const status = await fetch(url, { signal: AbortSignal.timeout(10_000) });
 assert.ok(status.ok, `Chat status returned HTTP ${status.status}`);
-assert.deepEqual(await status.json(), { assistant: ASSISTANT_PROFILE, availability: 'server', models: [DEFAULT_MODEL], webSearch: true, modes: MODE_IDS, skills: SKILL_IDS });
+const capability = await status.json();
+assert.deepEqual(capability.assistant, ASSISTANT_PROFILE);
+assert.equal(capability.availability, 'server');
+assert.ok(capability.models.includes(DEFAULT_MODEL) && capability.models.every(isHelioModelId));
+assert.ok(!capability.sampleModels?.includes(DEFAULT_MODEL), 'The live smoke expects a real bundled model, not a sample');
+assert.deepEqual(capability.modes, MODE_IDS);
+assert.deepEqual(capability.skills, SKILL_IDS.filter((skill) => skill !== 'search' || capability.webSearch));
 
 async function check(label, content, expected, { timeZone, searchQuery, source = 'server', skill } = {}) {
   const startedAt = performance.now();
@@ -54,4 +61,5 @@ if (benchmark) {
 await check('identity', 'Who are you?', /Xyvora AI.*xyvora\.net/, { source: 'skill', skill: 'about' });
 await check('calculator', 'What is 18% of 84.50?', /15\.21/, { source: 'skill', skill: 'calc' });
 await check('clock', '/time', /\d{1,2}:\d{2}.*America\/Chicago/, { timeZone: 'America/Chicago', source: 'clock', skill: 'time' });
-await check('search', 'What is NASA’s Artemis program?', /artemis|nasa|moon/i, { searchQuery: 'NASA Artemis program' });
+if (capability.webSearch) await check('search', 'What is NASA’s Artemis program?', /artemis|nasa|moon/i, { searchQuery: 'NASA Artemis program' });
+else console.log('XYVORA_LIVE search skipped: SearXNG is not configured.');

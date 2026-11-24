@@ -1,3 +1,5 @@
+import { connectionBindingFor, sameOriginJson } from './account.ts';
+import type { AccountConfig } from './account.ts';
 import { isProvider, publicApiTarget, WORKSPACE_PLUGINS_ENABLED } from '../shared/workspace-tools.ts';
 import type { WorkspaceStatus } from '../shared/workspace-tools.ts';
 import { MAX_VISION_BASE64 } from '../shared/media.ts';
@@ -35,7 +37,12 @@ async function runPublicApi(target: unknown, signal: AbortSignal) {
   return { endpoint: spec.endpoint, data: result };
 }
 
-export async function handleWorkspace(request: Request, config?: WorkspaceConfig, options?: { limit?: boolean }) {
+export async function handleWorkspace(request: Request, config: WorkspaceConfig = workspaceConfig(process.env), options?: { limit?: boolean; accounts?: AccountConfig }) {
+  const url = new URL(request.url);
+  const callback = request.method === 'GET' && ['code', 'state', 'error'].some((key) => url.searchParams.has(key));
+  if (config.appConnections && (url.searchParams.get('feature') === 'connections' || callback)) {
+    return handleAppConnections(request, config, options?.accounts, callback, options?.limit !== false);
+  }
   if (!WORKSPACE_PLUGINS_ENABLED) {
     return Response.json({ error: 'Workspace plugins are paused.' }, {
       status: 404,
@@ -43,6 +50,44 @@ export async function handleWorkspace(request: Request, config?: WorkspaceConfig
     });
   }
   return handleWorkspaceTools(request, config, options);
+}
+
+// App Connections is a distinct, authenticated allowlist. Enabling it does
+// not reopen Script Lab, media, the workbench or the public API explorer.
+async function handleAppConnections(request: Request, config: WorkspaceConfig, accounts: AccountConfig | undefined, callback: boolean, limit: boolean) {
+  const headers = new Headers({ 'Cache-Control': 'private, no-store', 'Referrer-Policy': 'no-referrer', 'X-Content-Type-Options': 'nosniff' });
+  const json = (value: object, status = 200) => Response.json(value, { headers, status });
+  try {
+    const origin = new URL(request.url).origin;
+    if (!accounts || origin !== accounts.origin || origin !== config.origin) throw new ToolError('App connections are unavailable on this origin.', 503);
+    if (request.method === 'POST') sameOriginJson(request, origin);
+    else if (request.method !== 'GET') { headers.set('Allow', 'GET, POST'); throw new ToolError('Method not allowed.', 405); }
+    else if (!callback && request.headers.get('sec-fetch-site') === 'cross-site') throw new ToolError('Use the Xyvora workspace to manage apps.', 403);
+    if (limit && (request.method === 'POST' || callback)) rateCheck(request, 'tool');
+    const binding = await connectionBindingFor(request, accounts, callback);
+    if (callback) return await finishConnection(request, config, headers, binding);
+    if (request.method === 'GET') return json({ connections: { gmail: connectionStatus(request, config, 'gmail', binding), vercel: connectionStatus(request, config, 'vercel', binding) } });
+    let input;
+    try { input = asObject(await boundedJson(request, 2_000)); }
+    catch (error) { throw error instanceof ToolError ? error : new ToolError('Send a valid app connection request.'); }
+    const { action, provider, operation, approved, teamSlug } = input;
+    if (approved !== true) throw new ToolError('Review and approve the action first.', 403);
+    if (!isProvider(provider)) throw new ToolError('Unknown app.');
+    if (action === 'connect') return json({ url: await startConnection(request, config, provider, headers, binding) });
+    if (action === 'disconnect') return json({ disconnected: true, revoked: await disconnect(request, config, provider, headers, binding) });
+    if (action === 'account' && (provider === 'gmail' ? operation === 'inbox' : operation === 'profile' || operation === 'projects')) {
+      try { return json(await readConnection(request, config, provider, operation as string, teamSlug, binding)); }
+      catch (error) {
+        if (error instanceof ToolError && error.status === 401) clearConnection(provider, headers);
+        throw error;
+      }
+    }
+    throw new ToolError('This app action is not allowed.');
+  } catch (error) {
+    const status = error instanceof ToolError ? error.status : 500;
+    if (status === 429) headers.set('Retry-After', '60');
+    return json({ error: error instanceof ToolError ? error.message : 'The app connection did not complete.' }, status);
+  }
 }
 
 // Kept independently testable while the public route is paused.
@@ -80,7 +125,7 @@ export async function handleWorkspaceTools(request: Request, config: WorkspaceCo
     }
     if (action === 'image') return json(await runImage(request, config, input));
     if (!isProvider(provider)) throw new ToolError('Unknown account provider.');
-    if (action === 'connect') return json({ url: startConnection(request, config, provider, headers) });
+    if (action === 'connect') return json({ url: await startConnection(request, config, provider, headers) });
     if (action === 'disconnect') return json({ disconnected: true, revoked: await disconnect(request, config, provider, headers) });
     if (action === 'account' && typeof operation === 'string') {
       try { return json(await readConnection(request, config, provider, operation, input.teamSlug)); }

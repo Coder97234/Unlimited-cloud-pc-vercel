@@ -6,7 +6,7 @@ export const MAX_MEMORY_NOTE = 220;
 export const MAX_MEMORY_CHARS = 1_000;
 export const MAX_ACCOUNT_MEMORY_NOTES = 100;
 export const MAX_ACCOUNT_MEMORY_CHARS = 10_000;
-export const emptyMemory = (): MemoryProfile => ({ enabled: false, notes: [] });
+export const emptyMemory = (): MemoryProfile => ({ enabled: true, notes: [] });
 
 export function parseMemoryNotes(input: unknown, cloud = false): string[] | undefined {
   if (!Array.isArray(input) || input.length > (cloud ? MAX_ACCOUNT_MEMORY_NOTES : MAX_MEMORY_NOTES)) return;
